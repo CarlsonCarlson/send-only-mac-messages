@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a problem with mac-messages-mcp
+description: Report a problem with send-only-mac-messages
 title: "[bug] "
 labels: ["bug"]
 body:
@@ -30,7 +30,7 @@ body:
       placeholder: |
         - macOS:
         - Python:
-        - MCP client (Claude Desktop/Cursor):
+        - MCP client:
         - Install method (PyPI/source/MCPB):
     validations:
       required: true
@@ -38,4 +38,4 @@ body:
     id: logs
     attributes:
       label: Logs / errors
-      description: Paste relevant output. Redact private message/contact data.
+      description: Paste relevant output. Remove every recipient identifier and message body.

@@ -24,7 +24,7 @@ import tempfile
 from pathlib import Path
 from typing import Iterable
 
-PROJECT_NAME = "mac-messages-mcp"
+PROJECT_NAME = "send-only-mac-messages"
 BUMP_KINDS = {"major", "minor", "patch"}
 STABLE_VERSION_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 VERSION_FILES = ("pyproject.toml", "uv.lock", "manifest.json")

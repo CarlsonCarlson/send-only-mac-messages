@@ -1,6 +1,6 @@
 # Versioning and releases
 
-Mac Messages MCP follows semantic versioning (`MAJOR.MINOR.PATCH`). The package,
+Send-only Mac Messages follows semantic versioning (`MAJOR.MINOR.PATCH`). The package,
 lockfile, Claude Desktop extension manifest, Git tag, PyPI release, and GitHub
 release must all agree on the same version.
 
@@ -47,29 +47,14 @@ uv run python scripts/bump_version.py --check
 1. Run the version command.
 2. Add the new release section to `CHANGELOG.md`.
 3. Open and merge a release pull request after CI is green.
-
-A merge to `main` that changes `pyproject.toml` or `manifest.json` starts the
-trusted release workflow. The workflow then:
-
-1. Synchronizes and commits `uv.lock` if the release branch did not include the
-   generated lockfile change.
-2. Re-validates version metadata and runs tests, formatting, typing, build, and
-   clean-wheel installation checks.
-3. Publishes to PyPI using OIDC trusted publishing; no long-lived PyPI token is
-   stored in GitHub.
-4. Creates an annotated `vX.Y.Z` tag only after PyPI succeeds.
-5. Creates or updates the matching GitHub release using the version's changelog
-   section.
-
-Publishing is idempotent: rerunning the workflow skips files already present on
-PyPI and repairs a missing tag or GitHub release.
+4. Publish only after this renamed package has an explicitly reviewed release workflow.
 
 ## Version authority
 
 - `pyproject.toml` is the canonical project version during development.
 - `uv.lock` is synchronized by `uv version`.
 - `manifest.json` mirrors the version for MCPB packaging.
-- `mac_messages_mcp.__version__` reads the installed package metadata at runtime.
+- `send_only_mac_messages.__version__` reads the installed package metadata at runtime.
 - `vX.Y.Z` tags and GitHub releases are created by the trusted release workflow.
 
 ## Choosing a bump

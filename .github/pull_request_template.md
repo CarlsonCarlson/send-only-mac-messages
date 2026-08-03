@@ -12,6 +12,8 @@
 
 ## Privacy / permissions checklist
 
-- [ ] No private Messages or Contacts data is committed
-- [ ] Any new tool output is scoped to requested fields only
+- [ ] No recipient identifiers or message bodies are committed
+- [ ] The MCP surface still contains exactly one send tool and no resources/prompts
+- [ ] No message, Contacts, chat, attachment, or database reader was introduced
+- [ ] Tool results, logs, process arguments, and environment variables do not expose send data
 - [ ] Permission changes (if any) are documented in README/SECURITY notes

@@ -1,3 +1,1 @@
-"""
-Tests for Mac Messages MCP
-"""
+"""Tests for send-only macOS Messages."""

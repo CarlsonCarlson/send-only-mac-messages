@@ -9,6 +9,5 @@ dist
 build
 *.egg-info
 tests
-memory-bank
-mac_messages_mcp.mcpb
+send_only_mac_messages.mcpb
 *.mcpb

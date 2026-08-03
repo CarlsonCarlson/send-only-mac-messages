@@ -3,18 +3,18 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mac-messages-mcp"
-version = "1.0.0"
-description = "A bridge for interacting with macOS Messages app through MCP"
+name = "send-only-mac-messages"
+version = "0.1.0"
+description = "A send-only MCP adapter for macOS Messages with SMS fallback"
 readme = {file = "README.md", content-type = "text/markdown"}
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    {name = "Carter Lasalle", email = "carterlasalle@gmail.com"}
+    {name = "Carlson Cheng"}
 ]
-keywords = ["macos", "messages", "imessage", "mcp"]
+keywords = ["macos", "messages", "imessage", "sms", "mcp", "send-only"]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -25,19 +25,13 @@ classifiers = [
     "Topic :: Communications :: Chat",
 ]
 dependencies = [
-    "mcp[cli]>=1.2.0,<2.0.0", # For FastMCP functionality with CLI support
-    "thefuzz>=0.20.0",
-    "python-Levenshtein>=0.23.0", # Optional but recommended for performance
-    "pillow>=10.0.0", # Image format handling for tool_get_attachment
-    "pillow-heif>=0.13.0", # HEIC support so iPhone photos can be returned inline
+    "mcp[cli]>=1.2.0,<2.0.0",
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/carterlasalle/mac_messages_mcp"
-"Bug Tracker" = "https://github.com/carterlasalle/mac_messages_mcp/issues"
-"Source" = "https://github.com/carterlasalle/mac_messages_mcp"
-"Changelog" = "https://github.com/carterlasalle/mac_messages_mcp/blob/main/CHANGELOG.md"
-"Releases" = "https://github.com/carterlasalle/mac_messages_mcp/releases"
+"Homepage" = "https://github.com/CarlsonCarlson/send-only-mac-messages"
+"Bug Tracker" = "https://github.com/CarlsonCarlson/send-only-mac-messages/issues"
+"Source" = "https://github.com/CarlsonCarlson/send-only-mac-messages"
 
 [project.optional-dependencies]
 dev = [
@@ -47,13 +41,11 @@ dev = [
     "mypy>=1.0.0",
 ]
 
-# Define both entry points to ensure it works with either name
 [project.scripts]
-mac-messages-mcp = "mac_messages_mcp.server:run_server"
-mac_messages_mcp = "mac_messages_mcp.server:run_server"
+send-only-mac-messages = "send_only_mac_messages.server:run_server"
 
 [tool.setuptools]
-packages = ["mac_messages_mcp"]
+packages = ["send_only_mac_messages"]
 
 [tool.black]
 line-length = 88

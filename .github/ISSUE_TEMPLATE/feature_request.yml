@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest an improvement to mac-messages-mcp
+description: Suggest an improvement to send-only-mac-messages
 title: "[feature] "
 labels: ["enhancement"]
 body:
@@ -26,4 +26,4 @@ body:
     id: privacy
     attributes:
       label: Privacy / permissions impact
-      description: Note any expected changes to data access, returned fields, or permissions prompts.
+      description: Explain how the proposal preserves the send-only boundary and avoids local data access.

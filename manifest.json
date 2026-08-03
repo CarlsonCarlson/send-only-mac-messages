@@ -1,85 +1,45 @@
 {
   "manifest_version": "0.3",
-  "name": "mac-messages-mcp",
-  "display_name": "Mac Messages MCP",
-  "version": "1.0.0",
-  "description": "Query, search, and send macOS Messages through a local MCP server.",
-  "long_description": "Mac Messages MCP 1.0 runs locally on macOS and provides Claude Desktop with stable tools for reading recent Messages, fuzzy-searching conversations, resolving contacts, sending iMessage/SMS messages, listing chats, checking permissions, and finding or fetching message attachments. It requires Full Disk Access for Claude Desktop or the terminal used to run it.",
+  "name": "send-only-mac-messages",
+  "display_name": "Send-only Mac Messages",
+  "version": "0.1.0",
+  "description": "Send direct macOS Messages without exposing local message or contact data.",
+  "long_description": "A narrow local MCP server with one outbound tool. It accepts an exact phone number and message body, tries iMessage, and retains immediate SMS/RCS fallback. It cannot read conversations, Contacts, chats, attachments, or the Messages database and does not require Full Disk Access.",
   "author": {
-    "name": "Carter Lasalle",
-    "email": "carterlasalle@gmail.com"
+    "name": "Carlson Cheng"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/carterlasalle/mac_messages_mcp.git"
+    "url": "https://github.com/CarlsonCarlson/send-only-mac-messages.git"
   },
-  "homepage": "https://github.com/carterlasalle/mac_messages_mcp",
-  "support": "https://github.com/carterlasalle/mac_messages_mcp/issues",
+  "homepage": "https://github.com/CarlsonCarlson/send-only-mac-messages",
+  "support": "https://github.com/CarlsonCarlson/send-only-mac-messages/issues",
   "license": "MIT",
   "keywords": [
     "macos",
     "messages",
     "imessage",
+    "sms",
     "mcp",
-    "claude-desktop"
+    "send-only"
   ],
   "server": {
     "type": "python",
-    "entry_point": "mac_messages_mcp/server.py",
+    "entry_point": "send_only_mac_messages/server.py",
     "mcp_config": {
       "command": "uv",
       "args": [
         "--directory",
         "${__dirname}",
         "run",
-        "mac-messages-mcp"
+        "send-only-mac-messages"
       ]
     }
   },
   "tools": [
     {
-      "name": "tool_get_recent_messages",
-      "description": "Read-only recent Messages lookup with optional contact or group chat ID filtering. Requires Full Disk Access and returns a plain-text message summary."
-    },
-    {
       "name": "tool_send_message",
-      "description": "Sends one outgoing iMessage or SMS/RCS through Messages using E.164 phone numbers or emails. Requires Messages automation permission and returns a plain-text success or error."
-    },
-    {
-      "name": "tool_find_contact",
-      "description": "Read-only AddressBook contact lookup by fuzzy name match. Requires Contacts permission and returns E.164 phone numbers for contact:N selection."
-    },
-    {
-      "name": "tool_check_db_access",
-      "description": "Read-only diagnostic for Messages database access and Full Disk Access permission errors."
-    },
-    {
-      "name": "tool_check_contacts",
-      "description": "Read-only contact availability check returning a count and sample AddressBook entries."
-    },
-    {
-      "name": "tool_check_addressbook",
-      "description": "Read-only diagnostic for AddressBook database access and Contacts permission errors."
-    },
-    {
-      "name": "tool_get_chats",
-      "description": "Read-only group chat listing that returns chat names and IDs for group message sends."
-    },
-    {
-      "name": "tool_check_imessage_availability",
-      "description": "Read-only iMessage capability check for a phone number or email; does not send a message."
-    },
-    {
-      "name": "tool_fuzzy_search_messages",
-      "description": "Read-only fuzzy message search with similarity scores across a configurable time window."
-    },
-    {
-      "name": "tool_search_attachments",
-      "description": "Read-only attachment metadata search by date range, contact, and MIME type; returns IDs for later fetch."
-    },
-    {
-      "name": "tool_get_attachment",
-      "description": "Read-only attachment fetch by database ID, returning inline images when small enough or a local path otherwise."
+      "description": "Sends one direct message to an exact phone number through Messages.app. Tries iMessage first and immediately falls back to SMS/RCS when the iMessage AppleScript attempt fails. Returns accepted-unverified or a fixed error code without echoing recipient or message content."
     }
   ],
   "compatibility": {

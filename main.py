@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""
-Mac Messages MCP - Main entry point for the package
-"""
-from mac_messages_mcp.server import run_server
+"""Send-only macOS Messages package entry point."""
+
+from send_only_mac_messages.server import run_server
 
 
-def main():
-    """Entry point for the mac-messages-mcp package"""
+def main() -> None:
+    """Run the send-only MCP server."""
     run_server()
 
 

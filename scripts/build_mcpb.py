@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build script for the Mac Messages MCP Claude Desktop extension (.mcpb).
+Build script for the Send-only Mac Messages extension (.mcpb).
 
 Vendors a `uv` binary into the bundle so the packaged extension runs on
 machines that don't have `uv` installed, then runs `mcpb pack`.
@@ -162,7 +162,10 @@ def main():
         i += 1
 
     if sys.platform != "darwin":
-        print("Warning: mac-messages-mcp targets macOS; building on a non-macOS host.")
+        print(
+            "Warning: send-only-mac-messages targets macOS; "
+            "building on a non-macOS host."
+        )
 
     if bundle:
         asset = resolve_asset(arch)

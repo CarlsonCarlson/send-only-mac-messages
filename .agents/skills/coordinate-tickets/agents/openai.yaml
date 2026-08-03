@@ -1,0 +1,6 @@
+interface:
+  display_name: "Coordinate Tickets"
+  short_description: "Execute approved tickets blockers-first"
+  default_prompt: "Use $coordinate-tickets to execute the approved ticket frontier until complete or genuinely blocked."
+policy:
+  allow_implicit_invocation: false

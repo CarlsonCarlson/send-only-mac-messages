@@ -15,17 +15,18 @@ SPEC.loader.exec_module(bump_version)
 
 def write_project(root: Path, version: str = "0.9.2") -> None:
     (root / "pyproject.toml").write_text(
-        '[project]\nname = "mac-messages-mcp"\n'
+        '[project]\nname = "send-only-mac-messages"\n'
         f'version = "{version}"\nrequires-python = ">=3.10"\n',
         encoding="utf-8",
     )
     (root / "manifest.json").write_text(
-        json.dumps({"name": "mac-messages-mcp", "version": version}, indent=2) + "\n",
+        json.dumps({"name": "send-only-mac-messages", "version": version}, indent=2)
+        + "\n",
         encoding="utf-8",
     )
     (root / "uv.lock").write_text(
         'version = 1\nrevision = 3\nrequires-python = ">=3.10"\n\n'
-        '[[package]]\nname = "mac-messages-mcp"\n'
+        '[[package]]\nname = "send-only-mac-messages"\n'
         f'version = "{version}"\nsource = {{ virtual = "." }}\n',
         encoding="utf-8",
     )
@@ -55,7 +56,7 @@ def test_set_version_delegates_to_uv_and_syncs_manifest(tmp_path: Path) -> None:
         assert check is True
         write_project(tmp_path, "1.0.0")
         # Simulate uv updating only pyproject + lock; the script owns manifest sync.
-        manifest = {"name": "mac-messages-mcp", "version": "0.9.2"}
+        manifest = {"name": "send-only-mac-messages", "version": "0.9.2"}
         (tmp_path / "manifest.json").write_text(json.dumps(manifest))
         return subprocess.CompletedProcess(command, 0)
 

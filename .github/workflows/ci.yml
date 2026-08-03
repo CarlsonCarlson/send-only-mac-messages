@@ -49,14 +49,14 @@ jobs:
       - name: Import ordering
         run: uv run --frozen --extra dev isort --check-only .
       - name: Typing (smoke)
-        run: uv run --frozen --extra dev mypy --follow-imports=skip --disable-error-code no-any-return mac_messages_mcp/server.py
+        run: uv run --frozen --extra dev mypy send_only_mac_messages
       - name: Build distributions
         run: uv build
       - name: Verify wheel installation
         run: |
-          uv venv --python 3.13 /tmp/mac-messages-wheel
-          uv pip install --python /tmp/mac-messages-wheel/bin/python dist/*.whl
-          /tmp/mac-messages-wheel/bin/python -c "import mac_messages_mcp; assert mac_messages_mcp.__version__ != '0.0.0+local'"
+          uv venv --python 3.13 /tmp/send-only-mac-messages-wheel
+          uv pip install --python /tmp/send-only-mac-messages-wheel/bin/python dist/*.whl
+          /tmp/send-only-mac-messages-wheel/bin/python -c "import send_only_mac_messages; assert send_only_mac_messages.__version__ != '0.0.0+local'"
       - name: Install pinned MCPB CLI
         run: yarn global add @anthropic-ai/mcpb@2.1.2
       - name: Build MCPB (arm64)
