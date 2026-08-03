@@ -112,6 +112,11 @@ authority. No Cloudflare cache rule is required: MCP requests use `POST`, and th
 origin returns `Cache-Control: no-store`. Do not enable Cache Reserve or create a
 rule that makes this hostname cache-eligible.
 
+Cloudflare Free permits one zone rate-limiting rule. If the zone already uses that
+rule for another MCP hostname, add this hostname and exact `/mcp` path as another
+`or` branch. Free-plan counters are shared by source IP and Cloudflare data center
+across every hostname matched by that rule.
+
 After publication, run the content-free public smoke. It never invokes the send
 tool:
 

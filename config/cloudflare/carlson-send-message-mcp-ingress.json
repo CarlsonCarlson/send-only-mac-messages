@@ -15,9 +15,18 @@
   },
   "rateLimit": {
     "action": "block",
-    "blockSeconds": 60,
-    "hostname": "carlson-send-message-mcp.mynimbus.ai",
+    "characteristics": [
+      "ip.src",
+      "cf.colo.id"
+    ],
+    "description": "Rate limit hosted Mac MCP endpoints",
+    "hostnames": [
+      "kevin-heimdall-mcp.mynimbus.ai",
+      "carlson-send-message-mcp.mynimbus.ai"
+    ],
+    "mitigationTimeoutSeconds": 10,
     "path": "/mcp",
-    "requestsPerMinute": 30
+    "periodSeconds": 10,
+    "requestsPerPeriod": 20
   }
 }
