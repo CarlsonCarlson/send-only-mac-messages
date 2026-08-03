@@ -111,6 +111,18 @@ contract. The Cloudflare Tunnel must:
 Origin bearer verification remains mandatory. Cloudflare is not the authentication
 authority.
 
+After publication, run the content-free public smoke. It never invokes the send
+tool:
+
+```bash
+./scripts/smoke-public-mcp-url.sh --negative-only
+./scripts/smoke-public-mcp-url.sh --positive-only
+```
+
+The negative smoke requires Cloudflare to block every non-`/mcp` path, while the
+positive smoke verifies the bearer, Carlson sender binding, initialization, exact
+one-tool discovery, zero resources, zero prompts, and no-store response headers.
+
 ## 6. Configure local Codex
 
 Place the raw bearer in the owner-only client environment as
