@@ -97,6 +97,18 @@ uv build
 
 Tests replace AppleScript execution and never send a real message.
 
+## Hosted canary harness
+
+`scripts/hosted_canary.py --smoke-only` initializes the packaged server and proves
+that discovery returns one send tool, zero resources, and zero prompts without
+invoking Messages.app.
+
+The live harness is intentionally one-shot. Its launcher refuses the wrong macOS
+user, the wrong console user, and any process that is not descended from the visible
+Terminal app. The approved phone handle arrives through a mode-600 FIFO; sanitized
+status contains only phase, canary ID, service, and outcome class. A failed or
+interrupted post-invocation result is never retried automatically.
+
 ## Origin
 
 This repository was forked from
