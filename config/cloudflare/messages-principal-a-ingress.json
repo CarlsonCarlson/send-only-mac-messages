@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "publication": {
+    "hostname": "messages-principal-a.mynimbus.ai",
+    "path": "/mcp",
+    "preserveHost": true,
+    "service": "http://127.0.0.1:49160"
+  },
+  "waf": {
+    "mcpHost": {
+      "allowExactPath": "/mcp",
+      "denyAllOtherPaths": true,
+      "hostname": "messages-principal-a.mynimbus.ai"
+    }
+  },
+  "cache": {
+    "hostname": "messages-principal-a.mynimbus.ai",
+    "mode": "bypass"
+  },
+  "rateLimit": {
+    "action": "block",
+    "blockSeconds": 60,
+    "hostname": "messages-principal-a.mynimbus.ai",
+    "path": "/mcp",
+    "requestsPerMinute": 30
+  }
+}
