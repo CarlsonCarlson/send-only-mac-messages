@@ -105,11 +105,12 @@ contract. The Cloudflare Tunnel must:
 - preserve `__PUBLIC_HOST__`
 - route only exact `/mcp` to `http://127.0.0.1:__LOOPBACK_PORT__`
 - reject all other paths for that hostname
-- bypass cache
 - apply coarse rate limiting
 
 Origin bearer verification remains mandatory. Cloudflare is not the authentication
-authority.
+authority. No Cloudflare cache rule is required: MCP requests use `POST`, and the
+origin returns `Cache-Control: no-store`. Do not enable Cache Reserve or create a
+rule that makes this hostname cache-eligible.
 
 After publication, run the content-free public smoke. It never invokes the send
 tool:

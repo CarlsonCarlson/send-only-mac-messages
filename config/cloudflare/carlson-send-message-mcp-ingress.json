@@ -13,10 +13,6 @@
       "hostname": "carlson-send-message-mcp.mynimbus.ai"
     }
   },
-  "cache": {
-    "hostname": "carlson-send-message-mcp.mynimbus.ai",
-    "mode": "bypass"
-  },
   "rateLimit": {
     "action": "block",
     "blockSeconds": 60,

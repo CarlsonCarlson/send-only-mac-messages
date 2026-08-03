@@ -13,10 +13,6 @@
       "hostname": "__PUBLIC_HOST__"
     }
   },
-  "cache": {
-    "hostname": "__PUBLIC_HOST__",
-    "mode": "bypass"
-  },
   "rateLimit": {
     "action": "block",
     "blockSeconds": 60,
