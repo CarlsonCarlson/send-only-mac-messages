@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.mynimbus.send-only-mac-messages.remote</string>
+
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__UV_PATH__</string>
+    <string>--directory</string>
+    <string>__REPOSITORY_PATH__</string>
+    <string>run</string>
+    <string>send-only-mac-messages-remote</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPOSITORY_PATH__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SEND_ONLY_MCP_PUBLIC_HOST</key>
+    <string>__PUBLIC_HOST__</string>
+    <key>SEND_ONLY_MCP_LOGICAL_SENDER</key>
+    <string>__LOGICAL_SENDER__</string>
+    <key>SEND_ONLY_MCP_EXPECTED_USER</key>
+    <string>__MACOS_SHORT_USER__</string>
+    <key>SEND_ONLY_MCP_BEARER_DIGEST_PATH</key>
+    <string>__BEARER_DIGEST_PATH__</string>
+    <key>SEND_ONLY_MCP_PORT</key>
+    <string>__LOOPBACK_PORT__</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>__LOG_DIRECTORY__/remote-mcp.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIRECTORY__/remote-mcp.stderr.log</string>
+</dict>
+</plist>

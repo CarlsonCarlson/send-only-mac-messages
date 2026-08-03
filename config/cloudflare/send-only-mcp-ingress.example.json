@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "publication": {
+    "hostname": "__PUBLIC_HOST__",
+    "path": "/mcp",
+    "preserveHost": true,
+    "service": "http://127.0.0.1:__LOOPBACK_PORT__"
+  },
+  "waf": {
+    "mcpHost": {
+      "allowExactPath": "/mcp",
+      "denyAllOtherPaths": true,
+      "hostname": "__PUBLIC_HOST__"
+    }
+  },
+  "cache": {
+    "hostname": "__PUBLIC_HOST__",
+    "mode": "bypass"
+  },
+  "rateLimit": {
+    "action": "block",
+    "blockSeconds": 60,
+    "hostname": "__PUBLIC_HOST__",
+    "path": "/mcp",
+    "requestsPerMinute": 30
+  }
+}

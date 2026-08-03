@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: Communications :: Chat",
 ]
 dependencies = [
-    "mcp[cli]>=1.2.0,<2.0.0",
+    "mcp[cli]>=1.29.0,<2.0.0",
 ]
 
 [project.urls]
@@ -43,6 +43,7 @@ dev = [
 
 [project.scripts]
 send-only-mac-messages = "send_only_mac_messages.server:run_server"
+send-only-mac-messages-remote = "send_only_mac_messages.remote:run_remote_server"
 
 [tool.setuptools]
 packages = ["send_only_mac_messages"]

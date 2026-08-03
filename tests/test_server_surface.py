@@ -18,6 +18,11 @@ def test_mcp_exposes_exactly_one_send_tool() -> None:
 
     assert [tool.name for tool in tools] == ["tool_send_message"]
     assert set(tools[0].inputSchema["properties"]) == {"recipient", "message"}
+    assert tools[0].annotations is not None
+    assert tools[0].annotations.readOnlyHint is False
+    assert tools[0].annotations.destructiveHint is True
+    assert tools[0].annotations.idempotentHint is False
+    assert tools[0].annotations.openWorldHint is True
 
 
 def test_mcp_exposes_no_resources_or_prompts() -> None:

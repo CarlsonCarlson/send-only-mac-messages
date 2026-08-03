@@ -84,6 +84,19 @@ The process must be launched inside the intended user's active macOS graphical
 session. An SSH-owned process does not inherit a Terminal process's Messages
 Automation permission.
 
+## Authenticated remote mode
+
+The optional `send-only-mac-messages-remote` entry point mirrors Heimdall's private
+remote-MCP pattern: stateless Streamable HTTP on loopback, a dedicated exact
+hostname and `/mcp` path, one bearer in the client environment, and only its SHA-256
+digest on the Mac. It also requires an expected logical sender label and rechecks the
+effective and active-console user immediately before each send.
+
+Remote authentication does not authorize a particular message. Keep the tool on
+per-call approval, and never automatically retry a timeout or missing response.
+See [the principal-bound remote setup guide](docs/remote-mcp-setup.md) and
+[ADR-0002](docs/adr/0002-principal-bound-remote-mcp.md).
+
 ## Verify
 
 ```bash
