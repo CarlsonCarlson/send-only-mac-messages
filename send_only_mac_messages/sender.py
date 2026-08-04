@@ -18,6 +18,10 @@ _UPSTREAM_DISPLAY_NAME = "recipient"
 _UPSTREAM_OUTCOME = re.compile(
     r"^Message (delivered|sent) successfully via (iMessage|iMessageLite|SMS|RCS) "
 )
+_UPSTREAM_ASYNC_FAILURE = re.compile(
+    r"^Error: message to recipient failed to send .*service "
+    r"(iMessage|iMessageLite|SMS|RCS)\)"
+)
 
 
 def normalize_phone_number(recipient: str) -> str:
@@ -48,15 +52,23 @@ def _redact_upstream_outcome(outcome: object) -> str:
     match = _UPSTREAM_OUTCOME.match(outcome)
     if match is not None:
         state, service = match.groups()
-        result_state = "delivered" if state == "delivered" else "sent-unconfirmed"
-        return f"{result_state}:{_service_token(service)}"
+        if state == "delivered":
+            return f"delivered:{_service_token(service)}"
+        return f"sent-unconfirmed:{_service_token(service)}:delivery-timeout"
 
     if outcome.startswith(
         f"Message to {_UPSTREAM_DISPLAY_NAME} was handed to Messages.app via "
     ):
         service = "SMS" if " via SMS," in outcome else "iMessage"
+        if "Messages database was unavailable" in outcome:
+            return f"accepted-unverified:{service}:database-unavailable"
+        if "no matching message row appeared" in outcome:
+            return f"accepted-unverified:{service}:message-not-correlated"
         return f"accepted-unverified:{service}"
 
+    failure = _UPSTREAM_ASYNC_FAILURE.match(outcome)
+    if failure is not None:
+        return f"error:send_failed:{_service_token(failure.group(1))}"
     if outcome.startswith("Error"):
         return "error:send_failed"
     if outcome.startswith("Unknown"):

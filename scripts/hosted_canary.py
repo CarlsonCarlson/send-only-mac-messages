@@ -36,6 +36,17 @@ def classify_result(result: object) -> tuple[str, str | None]:
         for service in ("iMessage", "SMS"):
             if texts == [f"{result_class}:{service}"]:
                 return result_class, service
+    for result_class, reasons in {
+        "sent-unconfirmed": ("delivery-timeout",),
+        "accepted-unverified": (
+            "database-unavailable",
+            "message-not-correlated",
+        ),
+    }.items():
+        for service in ("iMessage", "SMS"):
+            for reason in reasons:
+                if texts == [f"{result_class}:{service}:{reason}"]:
+                    return result_class, service
     return "error", None
 
 

@@ -28,8 +28,9 @@ _Avoid_: Shared history reader, searchable sender
 
 **Transient send observation**:
 A six-second, in-call `chat.db` observation restricted to recent outgoing candidates
-for the supplied phone number and send time. The verbatim upstream verifier prefers
-an exact body match, then falls back to the newest candidate for that recipient. It
+for the supplied phone number and send time. The observer prefers
+an exact body match, then falls back to the newest candidate for that recipient. The
+adapted verifier continues past `is_sent` until delivery, failure, or timeout. It
 returns fixed status tokens and retains no row, GUID, recipient, body, or attempt
 identifier after the call.
 _Avoid_: Message history, delivery database, later status lookup
@@ -60,13 +61,15 @@ _Avoid_: iMessage-only sender
 
 **Accepted-unverified**:
 A fixed result meaning Messages.app accepted the AppleScript command through iMessage
-or SMS, but the transient observer could not resolve a correlated status. It does not
-claim delivery or human receipt.
+or SMS, but the transient observer could not resolve a correlated status. Its fixed
+reason is `database-unavailable` or `message-not-correlated`. It does not claim
+delivery or human receipt.
 _Avoid_: Sent, delivered, receipt-confirmed
 
 **Sent-unconfirmed**:
-A fixed result meaning the correlated outgoing row was marked sent before its
-delivery flag was present. The verbatim upstream verifier stops at `is_sent`.
+A fixed result meaning the correlated outgoing row was marked sent, but its delivery
+flag was still absent when the observation window ended. Its fixed reason is
+`delivery-timeout`.
 _Avoid_: Delivered, failed
 
 **Delivered**:

@@ -48,7 +48,8 @@ The exact responsible runtime also needs Full Disk Access for transient delivery
 observation. A grant proven for Terminal does not by itself prove that a LaunchAgent
 process can read `~/Library/Messages/chat.db`. If the database is unavailable, sends
 remain possible but return `accepted-unverified` rather than a stronger status, and
-an accepted iMessage will not fall back to SMS.
+an accepted iMessage will not fall back to SMS. The fixed suffix
+`database-unavailable` distinguishes this case from `message-not-correlated`.
 
 ## 3. Create the bearer
 

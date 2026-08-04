@@ -36,13 +36,17 @@ Results are intentionally narrow:
 
 - `delivered:iMessage`
 - `delivered:SMS`
-- `sent-unconfirmed:iMessage`
-- `sent-unconfirmed:SMS`
-- `accepted-unverified:iMessage`
-- `accepted-unverified:SMS`
+- `sent-unconfirmed:iMessage:delivery-timeout`
+- `sent-unconfirmed:SMS:delivery-timeout`
+- `accepted-unverified:iMessage:database-unavailable`
+- `accepted-unverified:SMS:database-unavailable`
+- `accepted-unverified:iMessage:message-not-correlated`
+- `accepted-unverified:SMS:message-not-correlated`
 - `rejected:invalid_recipient`
 - `rejected:empty_message`
 - `rejected:message_too_long`
+- `error:send_failed:iMessage`
+- `error:send_failed:SMS`
 - `error:send_failed`
 - `error:timeout`
 - `error:automation_failed`
@@ -53,11 +57,14 @@ It searches recent outgoing rows using recipient and send time, prefers an exact
 match, and retains upstream's newest-recipient-row fallback when no body matches.
 `delivered` means that the resolved Messages row reported delivery; it does not mean
 a human read the message.
-`sent-unconfirmed` means the row was marked sent before its delivery flag was present;
-the verbatim upstream verifier stops polling at that point. `accepted-unverified`
-means Messages accepted the command but the observer could not resolve a row or access
-the database. A simultaneous send to the same recipient remains ambiguous, especially
-when the body cannot be decoded; the upstream fallback may resolve the newest row.
+`sent-unconfirmed` means the row was marked sent but its delivery flag was still
+absent when the six-second window ended. The observer continues polling after
+`is_sent`. `accepted-unverified` distinguishes an unavailable database from a message
+that could not be correlated. `error:send_failed:<service>` means the correlated row
+reported an asynchronous failure; the unsuffixed form covers failures where no
+service was resolved. A simultaneous send to the same recipient remains ambiguous,
+especially when the body cannot be decoded; the upstream fallback may resolve the
+newest row.
 
 Recipient and message content are passed to `osascript` over standard input, not in
 process arguments or environment variables. Tool results and logs do not echo either

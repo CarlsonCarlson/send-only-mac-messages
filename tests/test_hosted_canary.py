@@ -35,6 +35,29 @@ def test_classifies_only_allow_listed_send_outcome_tokens() -> None:
         "accepted-unverified",
         "SMS",
     )
+    assert classify_result(
+        Result([Content("text", "sent-unconfirmed:iMessage:delivery-timeout")])
+    ) == ("sent-unconfirmed", "iMessage")
+    assert classify_result(
+        Result(
+            [
+                Content(
+                    "text",
+                    "accepted-unverified:SMS:message-not-correlated",
+                )
+            ]
+        )
+    ) == ("accepted-unverified", "SMS")
+    assert classify_result(
+        Result(
+            [
+                Content(
+                    "text",
+                    "accepted-unverified:iMessage:database-unavailable",
+                )
+            ]
+        )
+    ) == ("accepted-unverified", "iMessage")
 
 
 def test_rejects_raw_or_ambiguous_tool_results() -> None:
@@ -43,3 +66,6 @@ def test_rejects_raw_or_ambiguous_tool_results() -> None:
         None,
     )
     assert classify_result(Result([], isError=True)) == ("error", None)
+    assert classify_result(
+        Result([Content("text", "accepted-unverified:iMessage:private-db-error")])
+    ) == ("error", None)

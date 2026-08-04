@@ -1,12 +1,13 @@
-"""Verbatim send and delivery subset cherry-picked from upstream Mac Messages MCP.
+"""Send and delivery subset adapted from upstream Mac Messages MCP.
 
 Upstream provenance:
 - SMS/RCS fallback: f77be9eb18d38ba1e3d0ea35721c45d4781344b9
 - Delivery verification: 1a8f309 (as merged in a6e460526096996ea04ab880e519e3ae627b0dc3)
 
-The marked function bodies below are unchanged from ``mac_messages_mcp/messages.py``
-at ``a6e4605``. Only the small ``run_applescript`` transport adapter is local: it
-preserves this fork's stdin-only payload boundary and redacts subprocess errors.
+Most marked function bodies come from ``mac_messages_mcp/messages.py`` at
+``a6e4605``. The local transport adapter preserves this fork's stdin-only payload
+boundary and redacts subprocess errors. The transient observer intentionally keeps
+polling after ``is_sent`` and preserves fixed unverified reasons per ADR-0004.
 """
 
 # isort: skip_file
@@ -41,7 +42,7 @@ def run_applescript(script: str, timeout: float = _APPLESCRIPT_TIMEOUT_SECONDS) 
     return completed.stdout.strip()
 
 
-# BEGIN VERBATIM UPSTREAM SUBSET (a6e4605:mac_messages_mcp/messages.py)
+# BEGIN ADAPTED UPSTREAM SUBSET (a6e4605:mac_messages_mcp/messages.py)
 # fmt: off
 
 def _connect_sqlite_readonly(path: str) -> sqlite3.Connection:
@@ -277,12 +278,14 @@ def _verify_send_in_db(
     re-encoded the text, or the row only has an attachment), we fall back to
     the plain latest-row behavior rather than reporting a false negative.
 
-    Returns the row (guid, error, is_sent, is_delivered, service), or None
-    if no row could be read before the timeout (e.g. no Full Disk Access).
+    Returns the terminal or last correlated row. If no row resolves, returns a
+    fixed database-unavailable sentinel or None for message-not-correlated.
     """
     apple_ns = int((sent_after_unix - APPLE_EPOCH_OFFSET - 1) * 1_000_000_000)
+    database_unavailable = False
 
     def _matching_rows(handles: List[str]) -> List[Dict[str, Any]]:
+        nonlocal database_unavailable
         placeholders = ", ".join("?" for _ in handles)
         # m.error is aliased to send_error so a real row can't be mistaken
         # for query_messages_db's {"error": ...} failure dict.
@@ -300,6 +303,8 @@ def _verify_send_in_db(
         results = query_messages_db(query, tuple(handles) + (apple_ns,))
         if results and "guid" in results[0]:
             return results
+        if results and "error" in results[0]:
+            database_unavailable = True
         return []
 
     def _best_row(handles: List[str]) -> Optional[Dict[str, Any]]:
@@ -319,18 +324,24 @@ def _verify_send_in_db(
     variants = _candidate_handles(recipient)
     deadline = time.time() + timeout
     row = None
+    last_row = None
     while time.time() < deadline:
         # Prefer the exact handle the send targeted; only widen to format
         # variants when the exact handle has no row (Messages sometimes
         # records the handle in a different format than it was given).
         row = _best_row(exact) or _best_row(variants)
         if row is not None:
-            # Stop polling once the row resolves: an error code appears, or
-            # the message is marked sent. Otherwise keep waiting.
-            if row.get("send_error") or row.get("is_sent"):
+            last_row = row
+            # A sent flag can precede the delivery flag, so keep polling until
+            # delivery, failure, or the observation window ends.
+            if row.get("send_error") or row.get("is_delivered"):
                 return row
         time.sleep(0.5)
-    return row
+    if last_row is not None:
+        return last_row
+    if database_unavailable:
+        return {"observation_error": "database-unavailable"}
+    return None
 
 
 def _report_send_outcome(
@@ -346,11 +357,16 @@ def _report_send_outcome(
     """
     row = _verify_send_in_db(recipient, sent_after_unix, message_text)
     if row is None:
-        # Could not read the database (or the row never appeared); report
-        # honestly instead of claiming success.
         return (
             f"Message to {display_name} was handed to Messages.app via {service}, "
-            f"but delivery could not be verified in the Messages database."
+            "but delivery could not be verified because no matching message row "
+            "appeared during the observation window."
+        )
+    if row.get("observation_error") == "database-unavailable":
+        return (
+            f"Message to {display_name} was handed to Messages.app via {service}, "
+            "but delivery could not be verified because the Messages database "
+            "was unavailable."
         )
     actual_service = row.get("service") or service
     if row.get("send_error"):
@@ -548,4 +564,4 @@ def _send_message_direct(
         return f"Error sending message: {str(e)}"
 
 # fmt: on
-# END VERBATIM UPSTREAM SUBSET
+# END ADAPTED UPSTREAM SUBSET

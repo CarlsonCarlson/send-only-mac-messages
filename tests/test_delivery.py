@@ -43,7 +43,7 @@ def test_matches_own_message_among_concurrent_sends() -> None:
         ),
         patch("send_only_mac_messages.upstream_messages.time") as mock_time,
     ):
-        mock_time.time.side_effect = [0.0, 0.0]
+        mock_time.time.side_effect = [0.0, 0.0, 7.0]
         row = _verify_send_in_db("+14155551234", 0.0, message_text="first message")
 
     assert row is not None
@@ -69,7 +69,7 @@ def test_falls_back_to_latest_row_when_no_body_matches() -> None:
         ),
         patch("send_only_mac_messages.upstream_messages.time") as mock_time,
     ):
-        mock_time.time.side_effect = [0.0, 0.0]
+        mock_time.time.side_effect = [0.0, 0.0, 7.0]
         row = _verify_send_in_db("+14155551234", 0.0, message_text="hello")
 
     assert row is not None

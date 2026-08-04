@@ -80,16 +80,113 @@ def test_cherry_picked_send_script_contains_imessage_then_sms_fallback() -> None
             "send_only_mac_messages.upstream_messages.query_messages_db",
             return_value=[database_row],
         ),
+        patch("send_only_mac_messages.upstream_messages.time.sleep"),
+        patch("send_only_mac_messages.upstream_messages.time.time") as mock_time,
     ):
+        mock_time.side_effect = [0.0, 0.0, 0.0, 7.0]
         result = send_message("+14155551234", "hello")
 
-    assert result == "sent-unconfirmed:iMessage"
+    assert result == "sent-unconfirmed:iMessage:delivery-timeout"
     script = runner.call_args.args[0]
     assert "service type = iMessage" in script
     assert "service type = SMS" in script
     assert script.index("service type = iMessage") < script.index("service type = SMS")
     assert 'return "success:iMessage"' in script
     assert 'return "success:SMS"' in script
+
+
+def test_send_waits_for_delivery_after_message_is_marked_sent() -> None:
+    sent_row = {
+        "guid": "guid-1",
+        "send_error": 0,
+        "is_sent": 1,
+        "is_delivered": 0,
+        "service": "iMessage",
+        "text": "hello",
+        "attributedBody": None,
+    }
+    delivered_row = {**sent_row, "is_delivered": 1}
+
+    with (
+        patch(
+            "send_only_mac_messages.upstream_messages.run_applescript",
+            return_value="success:iMessage",
+        ),
+        patch(
+            "send_only_mac_messages.upstream_messages.query_messages_db",
+            side_effect=[[sent_row], [delivered_row]],
+        ),
+        patch("send_only_mac_messages.upstream_messages.time.sleep"),
+    ):
+        result = send_message("+14155551234", "hello")
+
+    assert result == "delivered:iMessage"
+
+
+def test_send_reports_database_unavailable_when_observation_query_fails() -> None:
+    with (
+        patch(
+            "send_only_mac_messages.upstream_messages.run_applescript",
+            return_value="success:iMessage",
+        ),
+        patch(
+            "send_only_mac_messages.upstream_messages.query_messages_db",
+            return_value=[{"error": "private database failure"}],
+        ),
+        patch("send_only_mac_messages.upstream_messages.time.sleep"),
+        patch("send_only_mac_messages.upstream_messages.time.time") as mock_time,
+    ):
+        mock_time.side_effect = [0.0, 0.0, 0.0, 7.0]
+        result = send_message("+14155551234", "hello")
+
+    assert result == "accepted-unverified:iMessage:database-unavailable"
+
+
+def test_send_reports_message_not_correlated_when_no_row_appears() -> None:
+    with (
+        patch(
+            "send_only_mac_messages.upstream_messages.run_applescript",
+            return_value="success:iMessage",
+        ),
+        patch(
+            "send_only_mac_messages.upstream_messages.query_messages_db",
+            return_value=[],
+        ),
+        patch("send_only_mac_messages.upstream_messages.time.sleep"),
+        patch("send_only_mac_messages.upstream_messages.time.time") as mock_time,
+    ):
+        mock_time.side_effect = [0.0, 0.0, 0.0, 7.0]
+        result = send_message("+14155551234", "hello")
+
+    assert result == "accepted-unverified:iMessage:message-not-correlated"
+
+
+def test_send_reports_delivery_timeout_when_sent_never_becomes_delivered() -> None:
+    sent_row = {
+        "guid": "guid-1",
+        "send_error": 0,
+        "is_sent": 1,
+        "is_delivered": 0,
+        "service": "iMessage",
+        "text": "hello",
+        "attributedBody": None,
+    }
+    with (
+        patch(
+            "send_only_mac_messages.upstream_messages.run_applescript",
+            return_value="success:iMessage",
+        ),
+        patch(
+            "send_only_mac_messages.upstream_messages.query_messages_db",
+            return_value=[sent_row],
+        ),
+        patch("send_only_mac_messages.upstream_messages.time.sleep"),
+        patch("send_only_mac_messages.upstream_messages.time.time") as mock_time,
+    ):
+        mock_time.side_effect = [0.0, 0.0, 0.0, 7.0]
+        result = send_message("+14155551234", "hello")
+
+    assert result == "sent-unconfirmed:iMessage:delivery-timeout"
 
 
 def test_cherry_picked_direct_sms_helper_uses_sms_service() -> None:
@@ -111,7 +208,10 @@ def test_cherry_picked_direct_sms_helper_uses_sms_service() -> None:
             "send_only_mac_messages.upstream_messages.query_messages_db",
             return_value=[database_row],
         ),
+        patch("send_only_mac_messages.upstream_messages.time.sleep"),
+        patch("send_only_mac_messages.upstream_messages.time.time") as mock_time,
     ):
+        mock_time.side_effect = [0.0, 0.0, 0.0, 7.0]
         result = _send_message_sms("+14155551234", "hello", "recipient")
 
     assert result == "Message sent successfully via SMS to recipient"
@@ -123,16 +223,19 @@ def test_cherry_picked_direct_sms_helper_uses_sms_service() -> None:
 def test_upstream_human_results_are_mapped_to_fixed_redacted_tokens() -> None:
     cases = {
         "Message delivered successfully via iMessage to recipient": "delivered:iMessage",
-        "Message sent successfully via SMS to recipient": "sent-unconfirmed:SMS",
+        (
+            "Message sent successfully via SMS to recipient"
+        ): "sent-unconfirmed:SMS:delivery-timeout",
         (
             "Message to recipient was handed to Messages.app via iMessage, "
-            "but delivery could not be verified in the Messages database."
-        ): "accepted-unverified:iMessage",
+            "but delivery could not be verified because the Messages database "
+            "was unavailable."
+        ): "accepted-unverified:iMessage:database-unavailable",
         (
             "Error: message to recipient failed to send "
             "(Messages error code 22, service iMessage). "
             "The recipient may not be reachable via iMessage."
-        ): "error:send_failed",
+        ): "error:send_failed:iMessage",
     }
 
     for upstream_result, expected in cases.items():
