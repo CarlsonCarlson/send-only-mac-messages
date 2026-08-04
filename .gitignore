@@ -54,6 +54,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Local deployment credentials
+secrets/
+
 # IDE
 .idea/
 .vscode/
@@ -65,4 +68,4 @@ venv.bak/
 
 # MCPB build artifacts (vendored uv binary + packed extension)
 bin/
-*.mcpb 
+*.mcpb
