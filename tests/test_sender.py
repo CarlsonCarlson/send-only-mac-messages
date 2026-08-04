@@ -214,7 +214,7 @@ def test_send_does_not_claim_sent_when_correlated_row_remains_pending() -> None:
         mock_time.side_effect = [0.0, 0.0, 0.0, 7.0]
         result = send_message("+14155551234", "hello")
 
-    assert result == "accepted-unverified:iMessage:message-not-correlated"
+    assert result == "accepted-unverified:iMessage:status-pending"
 
 
 def test_cherry_picked_direct_sms_helper_uses_sms_service() -> None:

@@ -64,6 +64,8 @@ def _redact_upstream_outcome(outcome: object) -> str:
             return f"accepted-unverified:{service}:database-unavailable"
         if "no matching message row appeared" in outcome:
             return f"accepted-unverified:{service}:message-not-correlated"
+        if "matching message row remained pending" in outcome:
+            return f"accepted-unverified:{service}:status-pending"
         return "error:unexpected_result"
 
     failure = _UPSTREAM_ASYNC_FAILURE.match(outcome)

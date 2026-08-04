@@ -62,8 +62,8 @@ _Avoid_: iMessage-only sender
 **Accepted-unverified**:
 A fixed result meaning Messages.app accepted the AppleScript command through iMessage
 or SMS, but the transient observer could not resolve a correlated status. Its fixed
-reason is `database-unavailable` or `message-not-correlated`. It does not claim
-delivery or human receipt.
+reason is `database-unavailable`, `message-not-correlated`, or `status-pending`. It
+does not claim delivery or human receipt.
 _Avoid_: Sent, delivered, receipt-confirmed
 
 **Sent-unconfirmed**:

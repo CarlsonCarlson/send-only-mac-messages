@@ -32,6 +32,8 @@ Preserve observer failure provenance using only fixed, redacted reason tokens:
   the observer could not query `chat.db`;
 - `accepted-unverified:iMessage:message-not-correlated` or the SMS equivalent when
   no matching row appeared during the window; and
+- `accepted-unverified:iMessage:status-pending` or the SMS equivalent when a matching
+  row appeared but never reported sent, delivered, or failed; and
 - `error:send_failed:iMessage` or `error:send_failed:SMS` when the correlated row
   reported an asynchronous failure. Retain unsuffixed `error:send_failed` only when
   no delivery service can be resolved.
@@ -52,4 +54,6 @@ one-tool, no-retention, principal-isolation, and approval decisions remain in fo
   return and explains that the window expired.
 - Database permission and correlation failures are distinguishable without exposing
   private database details.
+- A matching row that never resolves a send state is reported without claiming it was
+  sent.
 - `delivered` still means a Messages database delivery flag, not human receipt.

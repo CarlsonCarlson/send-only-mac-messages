@@ -40,6 +40,7 @@ def classify_result(result: object) -> tuple[str, str | None]:
         "accepted-unverified": (
             "database-unavailable",
             "message-not-correlated",
+            "status-pending",
         ),
     }.items():
         for service in ("iMessage", "SMS"):

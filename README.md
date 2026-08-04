@@ -42,6 +42,8 @@ Results are intentionally narrow:
 - `accepted-unverified:SMS:database-unavailable`
 - `accepted-unverified:iMessage:message-not-correlated`
 - `accepted-unverified:SMS:message-not-correlated`
+- `accepted-unverified:iMessage:status-pending`
+- `accepted-unverified:SMS:status-pending`
 - `rejected:invalid_recipient`
 - `rejected:empty_message`
 - `rejected:message_too_long`
@@ -59,12 +61,12 @@ match, and retains upstream's newest-recipient-row fallback when no body matches
 a human read the message.
 `sent-unconfirmed` means the row was marked sent but its delivery flag was still
 absent when the six-second window ended. The observer continues polling after
-`is_sent`. `accepted-unverified` distinguishes an unavailable database from a message
-that could not be correlated. `error:send_failed:<service>` means the correlated row
-reported an asynchronous failure; the unsuffixed form covers failures where no
-service was resolved. A simultaneous send to the same recipient remains ambiguous,
-especially when the body cannot be decoded; the upstream fallback may resolve the
-newest row.
+`is_sent`. `accepted-unverified` distinguishes an unavailable database, a message
+that could not be correlated, and a matching row whose status remained pending.
+`error:send_failed:<service>` means the correlated row reported an asynchronous
+failure; the unsuffixed form covers failures where no service was resolved. A
+simultaneous send to the same recipient remains ambiguous, especially when the body
+cannot be decoded; the upstream fallback may resolve the newest row.
 
 Recipient and message content are passed to `osascript` over standard input, not in
 process arguments or environment variables. Tool results and logs do not echo either

@@ -19,7 +19,7 @@ import subprocess
 import time
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 _APPLESCRIPT_TIMEOUT_SECONDS = 30
 
@@ -229,6 +229,7 @@ APPLE_EPOCH_OFFSET = 978307200  # seconds between the unix epoch and 2001-01-01
 
 class _ObservationFailure(Enum):
     DATABASE_UNAVAILABLE = "database-unavailable"
+    STATUS_PENDING = "status-pending"
 
 
 def _candidate_handles(recipient: str) -> List[str]:
@@ -260,7 +261,7 @@ def _verify_send_in_db(
     sent_after_unix: float,
     message_text: Optional[str] = None,
     timeout: float = 6.0,
-) -> Optional[Dict[str, Any]]:
+) -> Union[Dict[str, Any], _ObservationFailure, None]:
     """
     Poll the Messages database for the outbound message to `recipient`
     recorded after `sent_after_unix`.
@@ -283,8 +284,8 @@ def _verify_send_in_db(
     re-encoded the text, or the row only has an attachment), we fall back to
     the plain latest-row behavior rather than reporting a false negative.
 
-    Returns the terminal row or last row observed as sent. If no sent row resolves,
-    returns a typed database-unavailable state or None for message-not-correlated.
+    Returns the terminal row or last row observed as sent. Otherwise returns a typed
+    database-unavailable or status-pending state, or None for message-not-correlated.
     """
     apple_ns = int((sent_after_unix - APPLE_EPOCH_OFFSET - 1) * 1_000_000_000)
     database_unavailable = False
@@ -330,6 +331,7 @@ def _verify_send_in_db(
     deadline = time.time() + timeout
     row = None
     last_sent_row = None
+    pending_row_seen = False
     while time.time() < deadline:
         # Prefer the exact handle the send targeted; only widen to format
         # variants when the exact handle has no row (Messages sometimes
@@ -342,11 +344,15 @@ def _verify_send_in_db(
                 return row
             if row.get("is_sent"):
                 last_sent_row = row
+            else:
+                pending_row_seen = True
         time.sleep(0.5)
     if last_sent_row is not None:
         return last_sent_row
     if database_unavailable:
         return _ObservationFailure.DATABASE_UNAVAILABLE
+    if pending_row_seen:
+        return _ObservationFailure.STATUS_PENDING
     return None
 
 
@@ -373,6 +379,12 @@ def _report_send_outcome(
             f"Message to {display_name} was handed to Messages.app via {service}, "
             "but delivery could not be verified because the Messages database "
             "was unavailable."
+        )
+    if row is _ObservationFailure.STATUS_PENDING:
+        return (
+            f"Message to {display_name} was handed to Messages.app via {service}, "
+            "but delivery could not be verified because the matching message row "
+            "remained pending for the observation window."
         )
     actual_service = row.get("service") or service
     if row.get("send_error"):

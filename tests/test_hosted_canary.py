@@ -47,6 +47,9 @@ def test_classifies_only_allow_listed_send_outcome_tokens() -> None:
             ]
         )
     ) == ("accepted-unverified", "iMessage")
+    assert classify_result(
+        Result([Content("text", "accepted-unverified:SMS:status-pending")])
+    ) == ("accepted-unverified", "SMS")
 
 
 def test_rejects_raw_or_ambiguous_tool_results() -> None:
