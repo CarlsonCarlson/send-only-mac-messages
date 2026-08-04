@@ -18,7 +18,7 @@ def test_mcp_exposes_exactly_one_send_tool() -> None:
 
     assert [tool.name for tool in tools] == ["tool_send_message"]
     assert tools[0].description is not None
-    assert "immediate SMS fallback" in tools[0].description
+    assert "falls back once to SMS/RCS" in tools[0].description
     assert set(tools[0].inputSchema["properties"]) == {"recipient", "message"}
     assert tools[0].annotations is not None
     assert tools[0].annotations.readOnlyHint is False
@@ -66,6 +66,7 @@ def test_manifest_declares_only_the_send_tool() -> None:
     manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
 
     assert [tool["name"] for tool in manifest["tools"]] == ["tool_send_message"]
+    assert "falls back once to SMS/RCS" in manifest["tools"][0]["description"]
 
 
 def test_tool_logs_and_result_do_not_echo_send_data(caplog) -> None:
@@ -74,10 +75,86 @@ def test_tool_logs_and_result_do_not_echo_send_data(caplog) -> None:
 
     with patch(
         "send_only_mac_messages.server.send_message",
-        return_value="accepted-unverified:iMessage:message-not-correlated",
+        return_value="error:send_status_unknown:iMessage:message-not-correlated",
     ):
         result = tool_send_message(recipient, message)
 
-    assert result == "accepted-unverified:iMessage:message-not-correlated"
+    assert result == "error:send_status_unknown:iMessage:message-not-correlated"
     assert recipient not in caplog.text
     assert message not in caplog.text
+
+
+def test_database_error_details_are_redacted_from_mcp_result_and_logs(caplog) -> None:
+    recipient = "+14155551234"
+    message = "private body"
+    private_database_error = "private database path and permission detail"
+
+    with (
+        patch(
+            "send_only_mac_messages.upstream_messages.run_applescript",
+            return_value="success",
+        ),
+        patch(
+            "send_only_mac_messages.upstream_messages.query_messages_db",
+            return_value=[{"error": private_database_error}],
+        ),
+        patch("send_only_mac_messages.upstream_messages.time.sleep"),
+        patch(
+            "send_only_mac_messages.upstream_messages.time.time",
+            side_effect=[0.0, 0.0, 0.0, 11.0],
+        ),
+    ):
+        result = tool_send_message(recipient, message)
+
+    assert result == "error:send_status_unknown:iMessage:database-unavailable"
+    assert private_database_error not in result
+    assert private_database_error not in caplog.text
+    assert recipient not in caplog.text
+    assert message not in caplog.text
+
+
+def test_candidate_details_and_messages_error_code_are_redacted(caplog) -> None:
+    recipient = "+14155551234"
+    message = "private body"
+    private_guid = "private-guid"
+    private_candidate_state = "private-candidate-state"
+    failed_row = {
+        "row_id": 987654,
+        "guid": private_guid,
+        "send_error": 22,
+        "is_sent": 0,
+        "is_delivered": 0,
+        "service": "iMessage",
+        "text": message,
+        "attributedBody": None,
+        "candidate_state": private_candidate_state,
+    }
+
+    with (
+        patch(
+            "send_only_mac_messages.upstream_messages.run_applescript",
+            side_effect=["success", "error:private SMS error"],
+        ),
+        patch(
+            "send_only_mac_messages.upstream_messages.query_messages_db",
+            return_value=[failed_row],
+        ),
+        patch(
+            "send_only_mac_messages.upstream_messages.time.time",
+            side_effect=[100.0, 100.0, 100.0, 200.0],
+        ),
+    ):
+        result = tool_send_message(recipient, message)
+
+    assert result == "error:send_failed:SMS"
+    combined_output = f"{result}\n{caplog.text}"
+    for private_value in (
+        recipient,
+        message,
+        private_guid,
+        private_candidate_state,
+        "987654",
+        "22",
+        "private SMS error",
+    ):
+        assert private_value not in combined_output

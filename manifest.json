@@ -4,7 +4,7 @@
   "display_name": "Send-only Mac Messages",
   "version": "0.1.0",
   "description": "Send direct macOS Messages and transiently verify their delivery status.",
-  "long_description": "A narrow local MCP server with one outbound tool. It accepts an exact phone number and message body, uses upstream's iMessage-first sender with immediate SMS/RCS fallback, and transiently observes only that outgoing send's status. It has no conversation, Contacts, chat, attachment, or later status lookup tools.",
+  "long_description": "A narrow local MCP server with one outbound tool. It accepts an exact phone number and message body, tries iMessage first, falls back once to SMS/RCS after an immediate or exactly correlated definitive failure, and transiently observes only those outgoing statuses. It has no conversation, Contacts, chat, attachment, or later status lookup tools.",
   "author": {
     "name": "Carlson Cheng"
   },
@@ -39,7 +39,7 @@
   "tools": [
     {
       "name": "tool_send_message",
-      "description": "Sends one direct message to an exact phone number through Messages.app using upstream's iMessage-first sender and immediate SMS/RCS fallback, then transiently checks its send status. Returns a fixed status without echoing recipient or message content."
+      "description": "Sends one direct message to an exact phone number through Messages.app, then transiently checks its send status. It tries iMessage first and falls back once to SMS/RCS after an immediate or exactly correlated definitive failure. Returns a fixed status without echoing recipient or message content."
     }
   ],
   "compatibility": {

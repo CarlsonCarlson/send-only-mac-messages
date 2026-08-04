@@ -226,7 +226,7 @@ def create_remote_application(
     send_lock = threading.Lock()
 
     def remote_send_message(recipient: str, message: str) -> dict[str, str]:
-        """Send with upstream's iMessage-first and immediate SMS fallback."""
+        """Tries iMessage first and falls back once to SMS/RCS after a definitive failure."""
         if not sender_attestor.attest():
             logger.error("Rejecting outbound request because sender attestation failed")
             return {
@@ -251,9 +251,9 @@ def create_remote_application(
         structured_output=True,
         remote_instructions=(
             "Every call requires explicit send authorization. The server may make one "
-            "upstream immediate SMS fallback inside the approved call. Clients "
-            "must never retry a tool-call error, timeout, interruption, or missing response; "
-            "the outcome may be unknown."
+            "internal SMS/RCS attempt after an immediate or exactly correlated "
+            "definitive iMessage failure. Clients must never retry a tool-call error, "
+            "timeout, interruption, or missing response; the outcome may be unknown."
         ),
     )
     protocol_server.settings.transport_security = TransportSecuritySettings(

@@ -35,19 +35,30 @@ def classify_result(result: object) -> tuple[str, str | None]:
     for service in ("iMessage", "SMS"):
         if texts == [f"delivered:{service}"]:
             return "delivered", service
-    for result_class, reasons in {
-        "sent-unconfirmed": ("delivery-timeout",),
-        "accepted-unverified": (
+    for service in ("iMessage", "SMS"):
+        if texts == [f"sent-unconfirmed:{service}:delivery-timeout"]:
+            return "sent-unconfirmed", service
+        for reason in (
             "database-unavailable",
             "message-not-correlated",
-            "status-pending",
-        ),
-    }.items():
-        for service in ("iMessage", "SMS"):
-            for reason in reasons:
-                if texts == [f"{result_class}:{service}:{reason}"]:
-                    return result_class, service
+            "send-state-timeout",
+        ):
+            if texts == [f"error:send_status_unknown:{service}:{reason}"]:
+                return "send-status-unknown", service
+        if texts == [f"error:send_failed:{service}"]:
+            return "send-failed", service
     return "error", None
+
+
+def mutation_evidence(result_class: str) -> bool | str:
+    """Return sanitized evidence that the invocation reached a submitted message."""
+    if result_class in {
+        "delivered",
+        "sent-unconfirmed",
+        "send-status-unknown",
+    }:
+        return True
+    return "unknown"
 
 
 def read_approved_target() -> str:
@@ -103,23 +114,19 @@ async def run(smoke_only: bool) -> int:
                     {"recipient": target, "message": body},
                 )
                 result_class, service = classify_result(result)
-                send_reached_messages = result_class in {
-                    "delivered",
-                    "sent-unconfirmed",
-                    "accepted-unverified",
-                }
+                messages_mutated = mutation_evidence(result_class)
                 emit(
                     "send_finished",
                     canary_id=canary_id,
                     result_class=result_class,
                     service=service,
-                    messages_mutated=True if send_reached_messages else "unknown",
+                    messages_mutated=messages_mutated,
                 )
                 emit(
                     "stopped",
-                    messages_mutated=True if send_reached_messages else "unknown",
+                    messages_mutated=messages_mutated,
                 )
-                return 0 if send_reached_messages else 1
+                return 0 if result_class in {"delivered", "sent-unconfirmed"} else 1
     except Exception as exc:
         emit(
             "failed",

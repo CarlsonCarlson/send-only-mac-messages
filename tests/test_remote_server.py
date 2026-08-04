@@ -7,6 +7,7 @@ import getpass
 import hashlib
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -17,6 +18,7 @@ import pytest
 from send_only_mac_messages.auth import BearerVerifier
 from send_only_mac_messages.remote import (
     MCP_REQUEST_BODY_CAP,
+    REMOTE_RESULT_BUSY,
     REMOTE_RESULT_SENDER_MISMATCH,
     AuthenticatedRemoteMCP,
     RemoteConfigurationError,
@@ -149,11 +151,13 @@ def test_remote_tool_description_exposes_sms_fallback_contract() -> None:
     assert response.status_code == 200
     tools = response.json()["result"]["tools"]
     assert [tool["name"] for tool in tools] == ["tool_send_message"]
-    assert "SMS fallback" in tools[0]["description"]
+    assert "falls back once to SMS/RCS" in tools[0]["description"]
 
 
 def test_authenticated_tool_call_attests_sender_and_returns_sender_label() -> None:
-    sender = Mock(return_value="accepted-unverified:iMessage:message-not-correlated")
+    sender = Mock(
+        return_value="error:send_status_unknown:iMessage:message-not-correlated"
+    )
     attestor = SenderAttestor(
         logical_sender=LOGICAL_SENDER,
         expected_uid=501,
@@ -168,7 +172,7 @@ def test_authenticated_tool_call_attests_sender_and_returns_sender_label() -> No
     result = response.json()["result"]["structuredContent"]
     assert result == {
         "sender": LOGICAL_SENDER,
-        "result": "accepted-unverified:iMessage:message-not-correlated",
+        "result": "error:send_status_unknown:iMessage:message-not-correlated",
     }
     sender.assert_called_once_with("+14155551234", "private body")
     assert "+14155551234" not in response.text
@@ -176,7 +180,9 @@ def test_authenticated_tool_call_attests_sender_and_returns_sender_label() -> No
 
 
 def test_sender_attestation_failure_never_invokes_messages() -> None:
-    sender = Mock(return_value="accepted-unverified:iMessage:message-not-correlated")
+    sender = Mock(
+        return_value="error:send_status_unknown:iMessage:message-not-correlated"
+    )
     attestor = SenderAttestor(
         logical_sender=LOGICAL_SENDER,
         expected_uid=501,
@@ -193,6 +199,68 @@ def test_sender_attestation_failure_never_invokes_messages() -> None:
         "result": REMOTE_RESULT_SENDER_MISMATCH,
     }
     sender.assert_not_called()
+
+
+def test_remote_sender_remains_serialized_during_a_long_fallback_call() -> None:
+    counter_lock = threading.Lock()
+    active_calls = 0
+    maximum_active_calls = 0
+
+    def sender(recipient: str, message: str) -> str:
+        nonlocal active_calls, maximum_active_calls
+        del recipient, message
+        with counter_lock:
+            active_calls += 1
+            maximum_active_calls = max(maximum_active_calls, active_calls)
+        threading.Event().wait(timeout=0.05)
+        with counter_lock:
+            active_calls -= 1
+        return "sent-unconfirmed:SMS:delivery-timeout"
+
+    app = _build_app(sender=sender)
+
+    async def exercise() -> tuple[httpx.Response, httpx.Response]:
+        async with app.protocol_app.router.lifespan_context(app.protocol_app):  # type: ignore[attr-defined]
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url=f"https://{PUBLIC_HOST}",
+            ) as client:
+                headers = {
+                    "Authorization": f"Bearer {BEARER}",
+                    "X-Expected-Sender": LOGICAL_SENDER,
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                }
+                first_call = _tool_call()
+                second_call = _tool_call()
+                second_call["id"] = 3
+                first_response, second_response = await asyncio.gather(
+                    client.post(
+                        "/mcp",
+                        content=json.dumps(first_call),
+                        headers=headers,
+                    ),
+                    client.post(
+                        "/mcp",
+                        content=json.dumps(second_call),
+                        headers=headers,
+                    ),
+                )
+                return first_response, second_response
+
+    first_response, second_response = asyncio.run(exercise())
+
+    result_tokens = {
+        first_response.json()["result"]["structuredContent"]["result"],
+        second_response.json()["result"]["structuredContent"]["result"],
+    }
+    assert result_tokens <= {
+        "sent-unconfirmed:SMS:delivery-timeout",
+        REMOTE_RESULT_BUSY,
+    }
+    assert "sent-unconfirmed:SMS:delivery-timeout" in result_tokens
+    assert maximum_active_calls == 1
 
 
 def _build_app(

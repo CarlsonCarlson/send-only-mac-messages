@@ -12,13 +12,14 @@ Disk Access to `chat.db`; macOS grants that file permission more broadly than th
 adapter's fixed query. No Contacts permission is needed.
 
 The package has no general history, contact, chat, or attachment reader. Its only
-local-data path used by MCP is the verbatim upstream read-only, six-second observer.
-It filters outgoing candidates by recipient and send time, prefers an exact body
-match, and retains upstream's newest-recipient-row fallback. The generic upstream
-query helper is internal and is not exposed as an MCP tool. Candidate rows are not
-retained after the call. SMS fallback occurs only inside the initial upstream
-AppleScript when the iMessage block errors; later or ambiguous outcomes never
-authorize a retry.
+local-data path used by MCP is a read-only, ten-second-per-attempt observer. It
+filters outgoing candidates by recipient, attempt start time, exact body, and
+expected transport, then pins the exact row identifier while that attempt remains
+in flight. A newest-recipient-row heuristic cannot determine status or authorize a
+second submission. The generic query helper is internal and is not exposed as an MCP
+tool. Candidate rows are not retained after the call. One SMS/RCS fallback is
+permitted after an immediate or exactly correlated definitive iMessage failure;
+later ambiguous outcomes never authorize a retry.
 
 The send payload is supplied to `osascript` over standard input. Recipient and body
 must not be added to arguments, environment variables, logs, tool results, fixtures,

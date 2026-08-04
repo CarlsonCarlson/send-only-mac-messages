@@ -1,6 +1,6 @@
 # ADR-0003: Observe one send transiently for delivery status
 
-**Status:** Accepted; polling stop condition and result tokens superseded by ADR-0004
+**Status:** Accepted; polling/results superseded by ADR-0004 and correlation by ADR-0005
 
 ## Context
 

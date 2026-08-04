@@ -14,20 +14,22 @@ and recipient discovery are rejected.
 The repository contains no general message-history query, Contacts integration, chat
 listing, attachments, or later status lookup. After a send is accepted, a fixed
 read-only `chat.db` query considers at most ten recent outgoing candidates for the
-same recipient and prefers the exact outbound body. It retains no database row or
-send identifier after the call. Heimdall is not part of the send path.
+same recipient and expected transport, and requires the exact outbound body. It pins
+that row only for the current attempt and retains no database row or send identifier
+after the call. Heimdall is not part of the send path.
 
 Apple Blocked Contacts remains the platform-level delivery block; this adapter
 neither reads nor maintains a separate blocklist.
 
 ## Delivery behavior
 
-Each call tries iMessage first. It tries the enabled SMS service if the AppleScript
-attempt fails immediately. This is the upstream SMS/RCS fallback from commit
-`f77be9e`; a later database-reported failure does not trigger another send attempt.
-It does not fall back after `sent-unconfirmed`, `accepted-unverified`, a timeout, or
-an interruption because the iMessage outcome could still be successful and a retry
-could duplicate the message.
+Each call tries iMessage first. It attempts the enabled SMS/RCS service exactly once
+if the iMessage AppleScript reports an immediate failure or the transient observer
+exactly correlates that iMessage attempt and reports a definitive failure. The SMS/RCS
+attempt gets its own start timestamp and observation window. It does not fall back
+after `sent-unconfirmed`, `error:send_status_unknown`, a timeout, an interruption, or
+a heuristic-only match because the iMessage outcome could still be successful and a
+retry could duplicate the message.
 
 SMS/RCS from a Mac depends on the paired iPhone and Messages configuration described by
 [Apple's Text Message Forwarding documentation](https://support.apple.com/en-us/102545).
@@ -38,35 +40,39 @@ Results are intentionally narrow:
 - `delivered:SMS`
 - `sent-unconfirmed:iMessage:delivery-timeout`
 - `sent-unconfirmed:SMS:delivery-timeout`
-- `accepted-unverified:iMessage:database-unavailable`
-- `accepted-unverified:SMS:database-unavailable`
-- `accepted-unverified:iMessage:message-not-correlated`
-- `accepted-unverified:SMS:message-not-correlated`
-- `accepted-unverified:iMessage:status-pending`
-- `accepted-unverified:SMS:status-pending`
+- `error:send_status_unknown:iMessage:database-unavailable`
+- `error:send_status_unknown:SMS:database-unavailable`
+- `error:send_status_unknown:iMessage:message-not-correlated`
+- `error:send_status_unknown:SMS:message-not-correlated`
+- `error:send_status_unknown:iMessage:send-state-timeout`
+- `error:send_status_unknown:SMS:send-state-timeout`
 - `rejected:invalid_recipient`
 - `rejected:empty_message`
 - `rejected:message_too_long`
 - `error:send_failed:iMessage`
 - `error:send_failed:SMS`
-- `error:send_failed`
 - `error:timeout`
 - `error:automation_failed`
 - `error:unexpected_result`
 
-The upstream transient observer polls every 500 milliseconds for at most six seconds.
-It searches recent outgoing rows using recipient and send time, prefers an exact body
-match, and retains upstream's newest-recipient-row fallback when no body matches.
+The transient observer polls every 500 milliseconds for at most ten seconds per
+transport attempt. It searches recent outgoing rows using recipient, attempt start
+time, exact body, and expected transport, then pins the exact row identifier for later
+polls. The newest-recipient-row heuristic is never authoritative.
 `delivered` means that the resolved Messages row reported delivery; it does not mean
 a human read the message.
 `sent-unconfirmed` means the row was marked sent but its delivery flag was still
-absent when the six-second window ended. The observer continues polling after
-`is_sent`. `accepted-unverified` distinguishes an unavailable database, a message
-that could not be correlated, and a matching row whose status remained pending.
-`error:send_failed:<service>` means the correlated row reported an asynchronous
-failure; the unsuffixed form covers failures where no service was resolved. A
-simultaneous send to the same recipient remains ambiguous, especially when the body
-cannot be decoded; the upstream fallback may resolve the newest row.
+absent when the ten-second window ended. The observer continues polling after
+`is_sent`. `error:send_status_unknown` distinguishes an unavailable database, a
+message that could not be correlated, and an exact row whose send state remained
+unresolved.
+`error:send_failed:<service>` means that transport reported an immediate failure or
+the exact correlated row reported an asynchronous failure. A simultaneous send to
+the same recipient remains unknown unless the exact body can be decoded and matched.
+
+Clients should allow at least 40 seconds for one MCP invocation. The AppleScript
+process timeout remains 30 seconds, and a timeout or missing response is ambiguous:
+never retry it automatically.
 
 Recipient and message content are passed to `osascript` over standard input, not in
 process arguments or environment variables. Tool results and logs do not echo either
@@ -127,7 +133,8 @@ effective and active-console user immediately before each send.
 
 Remote authentication does not authorize a particular message. Keep the tool on
 per-call approval, and never retry a tool-call timeout or missing response. The
-upstream immediate SMS fallback is part of the same approved call.
+one internal SMS/RCS fallback is part of the same approved call and occurs only after
+an immediate or exactly correlated definitive iMessage failure.
 See [the principal-bound remote setup guide](docs/remote-mcp-setup.md) and
 [ADR-0002](docs/adr/0002-principal-bound-remote-mcp.md).
 
@@ -154,7 +161,10 @@ The live harness is intentionally one-shot. Its launcher refuses the wrong macOS
 user, the wrong console user, and any process that is not descended from the visible
 Terminal app. The approved phone handle arrives through a mode-600 FIFO; sanitized
 status contains only phase, canary ID, service, and outcome class. A failed or
-interrupted post-invocation result is never retried automatically.
+interrupted post-invocation result is never retried automatically. Unknown-status
+tokens prove that a submission reached Messages.app. A definitive-failure token may
+instead represent an immediate failure, so mutation remains unknown. The harness
+returns failure unless the final result is delivered or sent-unconfirmed.
 
 ## Origin
 

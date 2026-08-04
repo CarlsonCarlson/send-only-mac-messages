@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from scripts.hosted_canary import classify_result
+from scripts.hosted_canary import classify_result, mutation_evidence
 
 
 @dataclass
@@ -32,24 +32,28 @@ def test_classifies_only_allow_listed_send_outcome_tokens() -> None:
             [
                 Content(
                     "text",
-                    "accepted-unverified:SMS:message-not-correlated",
+                    "error:send_status_unknown:SMS:message-not-correlated",
                 )
             ]
         )
-    ) == ("accepted-unverified", "SMS")
+    ) == ("send-status-unknown", "SMS")
     assert classify_result(
         Result(
             [
                 Content(
                     "text",
-                    "accepted-unverified:iMessage:database-unavailable",
+                    "error:send_status_unknown:iMessage:database-unavailable",
                 )
             ]
         )
-    ) == ("accepted-unverified", "iMessage")
+    ) == ("send-status-unknown", "iMessage")
     assert classify_result(
-        Result([Content("text", "accepted-unverified:SMS:status-pending")])
-    ) == ("accepted-unverified", "SMS")
+        Result([Content("text", "error:send_status_unknown:SMS:send-state-timeout")])
+    ) == ("send-status-unknown", "SMS")
+    assert classify_result(Result([Content("text", "error:send_failed:SMS")])) == (
+        "send-failed",
+        "SMS",
+    )
 
 
 def test_rejects_raw_or_ambiguous_tool_results() -> None:
@@ -59,7 +63,7 @@ def test_rejects_raw_or_ambiguous_tool_results() -> None:
     )
     assert classify_result(Result([], isError=True)) == ("error", None)
     assert classify_result(
-        Result([Content("text", "accepted-unverified:iMessage:private-db-error")])
+        Result([Content("text", "error:send_status_unknown:iMessage:private-db-error")])
     ) == ("error", None)
     assert classify_result(Result([Content("text", "sent-unconfirmed:iMessage")])) == (
         "error",
@@ -68,3 +72,11 @@ def test_rejects_raw_or_ambiguous_tool_results() -> None:
     assert classify_result(
         Result([Content("text", "accepted-unverified:iMessage")])
     ) == ("error", None)
+
+
+def test_send_failure_does_not_claim_messages_state_was_mutated() -> None:
+    assert mutation_evidence("delivered") is True
+    assert mutation_evidence("sent-unconfirmed") is True
+    assert mutation_evidence("send-status-unknown") is True
+    assert mutation_evidence("send-failed") == "unknown"
+    assert mutation_evidence("error") == "unknown"

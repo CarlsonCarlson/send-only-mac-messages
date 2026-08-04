@@ -14,3 +14,9 @@
   Cloudflare deployment templates.
 - Cherry-pick upstream's read-only, six-second delivery verifier from `1a8f309`
   verbatim, without adding another MCP tool or retaining message state.
+- Require exact body and transport correlation, pin the resolved attempt row, and
+  observe each transport for up to ten seconds at 500-millisecond intervals.
+- Fall back to SMS/RCS exactly once after an immediate or exactly correlated
+  definitive iMessage failure, with a fresh timestamp and observation window.
+- Replace `accepted-unverified` and `status-pending` with fixed
+  `error:send_status_unknown` reason tokens.
