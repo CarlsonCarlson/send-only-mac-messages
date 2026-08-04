@@ -1,4 +1,4 @@
-"""Behavioral tests for the send-only adapter around upstream Messages code."""
+"""Behavioral tests for the send-only transport state machine."""
 
 from __future__ import annotations
 
@@ -14,15 +14,62 @@ from send_only_mac_messages.sender import (
     run_applescript,
     send_message,
 )
-from send_only_mac_messages.upstream_messages import _send_message_sms
+from send_only_mac_messages.upstream_messages import (
+    APPLE_EPOCH_OFFSET,
+    AttemptOutcome,
+    AttemptState,
+    CorrelationConfidence,
+    DeliveryService,
+    OutcomeReason,
+)
+
+TARGET = "+14155551234"
+BODY = "hello"
+
+
+def outcome(
+    state: AttemptState,
+    service: DeliveryService,
+    *,
+    correlation: CorrelationConfidence = CorrelationConfidence.EXACT,
+    reason: OutcomeReason | None = None,
+    fallback_permitted: bool = False,
+) -> AttemptOutcome:
+    return AttemptOutcome(
+        state=state,
+        service=service,
+        correlation=correlation,
+        reason=reason,
+        fallback_permitted=fallback_permitted,
+    )
+
+
+def database_row(
+    *,
+    service: str,
+    send_error: int = 0,
+    is_sent: int = 1,
+    is_delivered: int = 0,
+) -> dict[str, object]:
+    return {
+        "row_id": 41,
+        "guid": "fixture-guid",
+        "send_error": send_error,
+        "is_sent": is_sent,
+        "is_delivered": is_delivered,
+        "service": service,
+        "text": BODY,
+        "attributedBody": None,
+        "handle": TARGET,
+    }
 
 
 @pytest.mark.parametrize(
     ("raw", "normalized"),
     [
-        ("4155551234", "+14155551234"),
-        ("(415) 555-1234", "+14155551234"),
-        ("14155551234", "+14155551234"),
+        ("4155551234", TARGET),
+        ("(415) 555-1234", TARGET),
+        ("14155551234", TARGET),
         ("+44 20 7946 0958", "+442079460958"),
     ],
 )
@@ -36,23 +83,21 @@ def test_normalizes_raw_phone_numbers(raw: str, normalized: str) -> None:
 )
 def test_rejects_every_recipient_form_except_phone_numbers(recipient: str) -> None:
     sender = Mock()
-    assert (
-        send_message(recipient, "hello", upstream_sender=sender)
-        == "rejected:invalid_recipient"
+    assert send_message(recipient, BODY, upstream_sender=sender) == (
+        "rejected:invalid_recipient"
     )
     sender.assert_not_called()
 
 
-def test_rejects_empty_and_oversized_messages_without_invoking_upstream() -> None:
+def test_rejects_empty_and_oversized_messages_without_invoking_messages() -> None:
     sender = Mock()
 
-    assert (
-        send_message("+14155551234", "   ", upstream_sender=sender)
-        == "rejected:empty_message"
+    assert send_message(TARGET, "   ", upstream_sender=sender) == (
+        "rejected:empty_message"
     )
     assert (
         send_message(
-            "+14155551234",
+            TARGET,
             "x" * (MAX_MESSAGE_CHARS + 1),
             upstream_sender=sender,
         )
@@ -61,241 +106,181 @@ def test_rejects_empty_and_oversized_messages_without_invoking_upstream() -> Non
     sender.assert_not_called()
 
 
-def test_cherry_picked_send_script_contains_imessage_then_sms_fallback() -> None:
-    database_row = {
-        "guid": "guid-1",
-        "send_error": 0,
-        "is_sent": 1,
-        "is_delivered": 0,
-        "service": "iMessage",
-        "text": "hello",
-        "attributedBody": None,
-    }
+def test_exact_imessage_failure_triggers_one_fresh_sms_attempt() -> None:
+    imessage_failure = database_row(service="iMessage", send_error=22, is_sent=0)
+    sms_delivery = database_row(service="RCS", is_delivered=1)
+
     with (
         patch(
             "send_only_mac_messages.upstream_messages.run_applescript",
-            return_value="success:iMessage",
+            side_effect=["success:iMessage", "success"],
         ) as runner,
         patch(
             "send_only_mac_messages.upstream_messages.query_messages_db",
-            return_value=[database_row],
+            side_effect=[[imessage_failure], [sms_delivery]],
+        ) as query,
+        patch(
+            "send_only_mac_messages.upstream_messages.time.time",
+            side_effect=[100.0, 200.0],
         ),
-        patch("send_only_mac_messages.upstream_messages.time.sleep"),
-        patch("send_only_mac_messages.upstream_messages.time.time") as mock_time,
+        patch(
+            "send_only_mac_messages.upstream_messages.time.monotonic",
+            side_effect=[0.0, 0.0, 20.0, 20.0],
+        ),
     ):
-        mock_time.side_effect = [0.0, 0.0, 0.0, 7.0]
-        result = send_message("+14155551234", "hello")
+        result = send_message(TARGET, BODY)
 
-    assert result == "sent-unconfirmed:iMessage:delivery-timeout"
-    script = runner.call_args.args[0]
-    assert "service type = iMessage" in script
-    assert "service type = SMS" in script
-    assert script.index("service type = iMessage") < script.index("service type = SMS")
-    assert 'return "success:iMessage"' in script
-    assert 'return "success:SMS"' in script
+    assert result == "delivered:SMS"
+    assert runner.call_count == 2
+    first_script, second_script = (call.args[0] for call in runner.call_args_list)
+    assert "service type = iMessage" in first_script
+    assert "service type = SMS" not in first_script
+    assert "service type = SMS" in second_script
+    assert "service type = iMessage" not in second_script
+    assert query.call_args_list[0].args[1][-1] == int(
+        (100.0 - APPLE_EPOCH_OFFSET - 1) * 1_000_000_000
+    )
+    assert query.call_args_list[1].args[1][-1] == int(
+        (200.0 - APPLE_EPOCH_OFFSET - 1) * 1_000_000_000
+    )
 
 
-def test_send_waits_for_delivery_after_message_is_marked_sent() -> None:
-    sent_row = {
-        "guid": "guid-1",
-        "send_error": 0,
-        "is_sent": 1,
-        "is_delivered": 0,
-        "service": "iMessage",
-        "text": "hello",
-        "attributedBody": None,
-    }
-    delivered_row = {**sent_row, "is_delivered": 1}
-
+def test_synchronous_imessage_error_keeps_immediate_sms_fallback() -> None:
+    sms_delivery = database_row(service="SMS", is_delivered=1)
     with (
         patch(
             "send_only_mac_messages.upstream_messages.run_applescript",
-            return_value="success:iMessage",
-        ),
-        patch(
-            "send_only_mac_messages.upstream_messages.query_messages_db",
-            side_effect=[[sent_row], [delivered_row]],
-        ),
-        patch("send_only_mac_messages.upstream_messages.time.sleep"),
-    ):
-        result = send_message("+14155551234", "hello")
-
-    assert result == "delivered:iMessage"
-
-
-def test_send_reports_database_unavailable_when_observation_query_fails() -> None:
-    with (
-        patch(
-            "send_only_mac_messages.upstream_messages.run_applescript",
-            return_value="success:iMessage",
-        ),
-        patch(
-            "send_only_mac_messages.upstream_messages.query_messages_db",
-            return_value=[{"error": "private database failure"}],
-        ),
-        patch("send_only_mac_messages.upstream_messages.time.sleep"),
-        patch("send_only_mac_messages.upstream_messages.time.time") as mock_time,
-    ):
-        mock_time.side_effect = [0.0, 0.0, 0.0, 7.0]
-        result = send_message("+14155551234", "hello")
-
-    assert result == "accepted-unverified:iMessage:database-unavailable"
-
-
-def test_send_reports_message_not_correlated_when_no_row_appears() -> None:
-    with (
-        patch(
-            "send_only_mac_messages.upstream_messages.run_applescript",
-            return_value="success:iMessage",
-        ),
-        patch(
-            "send_only_mac_messages.upstream_messages.query_messages_db",
-            return_value=[],
-        ),
-        patch("send_only_mac_messages.upstream_messages.time.sleep"),
-        patch("send_only_mac_messages.upstream_messages.time.time") as mock_time,
-    ):
-        mock_time.side_effect = [0.0, 0.0, 0.0, 7.0]
-        result = send_message("+14155551234", "hello")
-
-    assert result == "accepted-unverified:iMessage:message-not-correlated"
-
-
-def test_send_reports_delivery_timeout_when_sent_never_becomes_delivered() -> None:
-    sent_row = {
-        "guid": "guid-1",
-        "send_error": 0,
-        "is_sent": 1,
-        "is_delivered": 0,
-        "service": "iMessage",
-        "text": "hello",
-        "attributedBody": None,
-    }
-    with (
-        patch(
-            "send_only_mac_messages.upstream_messages.run_applescript",
-            return_value="success:iMessage",
-        ),
-        patch(
-            "send_only_mac_messages.upstream_messages.query_messages_db",
-            return_value=[sent_row],
-        ),
-        patch("send_only_mac_messages.upstream_messages.time.sleep"),
-        patch("send_only_mac_messages.upstream_messages.time.time") as mock_time,
-    ):
-        mock_time.side_effect = [0.0, 0.0, 0.0, 7.0]
-        result = send_message("+14155551234", "hello")
-
-    assert result == "sent-unconfirmed:iMessage:delivery-timeout"
-
-
-def test_send_does_not_claim_sent_when_correlated_row_remains_pending() -> None:
-    pending_row = {
-        "guid": "guid-1",
-        "send_error": 0,
-        "is_sent": 0,
-        "is_delivered": 0,
-        "service": "iMessage",
-        "text": "hello",
-        "attributedBody": None,
-    }
-    with (
-        patch(
-            "send_only_mac_messages.upstream_messages.run_applescript",
-            return_value="success:iMessage",
-        ),
-        patch(
-            "send_only_mac_messages.upstream_messages.query_messages_db",
-            return_value=[pending_row],
-        ),
-        patch("send_only_mac_messages.upstream_messages.time.sleep"),
-        patch("send_only_mac_messages.upstream_messages.time.time") as mock_time,
-    ):
-        mock_time.side_effect = [0.0, 0.0, 0.0, 7.0]
-        result = send_message("+14155551234", "hello")
-
-    assert result == "accepted-unverified:iMessage:status-pending"
-
-
-def test_cherry_picked_direct_sms_helper_uses_sms_service() -> None:
-    database_row = {
-        "guid": "guid-1",
-        "send_error": 0,
-        "is_sent": 1,
-        "is_delivered": 0,
-        "service": "SMS",
-        "text": "hello",
-        "attributedBody": None,
-    }
-    with (
-        patch(
-            "send_only_mac_messages.upstream_messages.run_applescript",
-            return_value="success",
+            side_effect=["error:send_failed:iMessage", "success"],
         ) as runner,
         patch(
             "send_only_mac_messages.upstream_messages.query_messages_db",
-            return_value=[database_row],
+            return_value=[sms_delivery],
         ),
-        patch("send_only_mac_messages.upstream_messages.time.sleep"),
-        patch("send_only_mac_messages.upstream_messages.time.time") as mock_time,
+        patch(
+            "send_only_mac_messages.upstream_messages.time.time",
+            side_effect=[100.0, 200.0],
+        ),
+        patch(
+            "send_only_mac_messages.upstream_messages.time.monotonic",
+            side_effect=[0.0, 0.0],
+        ),
     ):
-        mock_time.side_effect = [0.0, 0.0, 0.0, 7.0]
-        result = _send_message_sms("+14155551234", "hello", "recipient")
+        result = send_message(TARGET, BODY)
 
-    assert result == "Message sent successfully via SMS to recipient"
-    script = runner.call_args.args[0]
-    assert "service type = SMS" in script
-    assert "service type = iMessage" not in script
+    assert result == "delivered:SMS"
+    assert runner.call_count == 2
 
 
-def test_upstream_human_results_are_mapped_to_fixed_redacted_tokens() -> None:
-    cases = {
-        "Message delivered successfully via iMessage to recipient": "delivered:iMessage",
-        (
-            "Message sent successfully via SMS to recipient"
-        ): "sent-unconfirmed:SMS:delivery-timeout",
-        (
-            "Message to recipient was handed to Messages.app via iMessage, "
-            "but delivery could not be verified because the Messages database "
-            "was unavailable."
-        ): "accepted-unverified:iMessage:database-unavailable",
-        (
-            "Error: message to recipient failed to send "
-            "(Messages error code 22, service iMessage). "
-            "The recipient may not be reachable via iMessage."
-        ): "error:send_failed:iMessage",
-    }
-
-    for upstream_result, expected in cases.items():
-        sender = Mock(return_value=upstream_result)
-        assert (
-            send_message("+14155551234", "private body", upstream_sender=sender)
-            == expected
-        )
-        sender.assert_called_once_with(
-            "+14155551234", "private body", "recipient", False
-        )
-
-
-def test_legacy_unreasoned_observation_result_is_rejected() -> None:
-    sender = Mock(
-        return_value=(
-            "Message to recipient was handed to Messages.app via iMessage, "
-            "but delivery could not be verified in the Messages database."
+@pytest.mark.parametrize(
+    ("reason", "correlation"),
+    [
+        (OutcomeReason.DATABASE_UNAVAILABLE, CorrelationConfidence.NONE),
+        (OutcomeReason.MESSAGE_NOT_CORRELATED, CorrelationConfidence.NONE),
+        (OutcomeReason.SEND_STATE_TIMEOUT, CorrelationConfidence.EXACT),
+    ],
+)
+@pytest.mark.parametrize("service", [DeliveryService.IMESSAGE, DeliveryService.SMS])
+def test_unknown_outcome_for_either_service_never_triggers_fallback(
+    reason: OutcomeReason,
+    correlation: CorrelationConfidence,
+    service: DeliveryService,
+) -> None:
+    first = Mock(
+        return_value=outcome(
+            AttemptState.UNKNOWN,
+            service,
+            correlation=correlation,
+            reason=reason,
         )
     )
+    sms = Mock()
 
-    assert (
-        send_message("+14155551234", "private body", upstream_sender=sender)
-        == "error:unexpected_result"
+    result = send_message(TARGET, BODY, upstream_sender=first, sms_sender=sms)
+
+    assert result == f"error:send_status_unknown:{service.value}:{reason.value}"
+    sms.assert_not_called()
+
+
+@pytest.mark.parametrize("service", [DeliveryService.IMESSAGE, DeliveryService.SMS])
+def test_sent_without_delivery_never_triggers_fallback(
+    service: DeliveryService,
+) -> None:
+    first = Mock(
+        return_value=outcome(
+            AttemptState.SENT_UNCONFIRMED,
+            service,
+            reason=OutcomeReason.DELIVERY_TIMEOUT,
+        )
     )
+    sms = Mock()
+
+    assert send_message(TARGET, BODY, upstream_sender=first, sms_sender=sms) == (
+        f"sent-unconfirmed:{service.value}:delivery-timeout"
+    )
+    sms.assert_not_called()
 
 
-def test_exact_message_is_escaped_by_cherry_picked_helper() -> None:
-    message = 'first "line"\\path\nsecond\tline'
-    escaped = escape_applescript(message)
+def test_sms_failure_stops_without_a_loop_or_retry() -> None:
+    imessage_failure = outcome(
+        AttemptState.FAILED,
+        DeliveryService.IMESSAGE,
+        fallback_permitted=True,
+    )
+    sms_failure = outcome(
+        AttemptState.FAILED,
+        DeliveryService.SMS,
+        correlation=CorrelationConfidence.EXACT,
+    )
+    first = Mock(return_value=imessage_failure)
+    sms = Mock(return_value=sms_failure)
 
-    assert escaped == 'first \\"line\\"\\\\path\\nsecond\\tline'
+    assert send_message(TARGET, BODY, upstream_sender=first, sms_sender=sms) == (
+        "error:send_failed:SMS"
+    )
+    first.assert_called_once()
+    sms.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("internal", "public"),
+    [
+        ("Error: AppleScript timed out after 30 seconds", "error:timeout"),
+        ("Error: AppleScript automation failed", "error:automation_failed"),
+        (None, "error:unexpected_result"),
+    ],
+)
+def test_ambiguous_or_missing_dispatch_result_never_triggers_fallback(
+    internal: object, public: str
+) -> None:
+    first = Mock(return_value=internal)
+    sms = Mock()
+
+    assert send_message(TARGET, BODY, upstream_sender=first, sms_sender=sms) == public
+    sms.assert_not_called()
+
+
+def test_tool_interruption_propagates_without_fallback() -> None:
+    first = Mock(side_effect=InterruptedError("fixture interruption"))
+    sms = Mock()
+
+    with pytest.raises(InterruptedError):
+        send_message(TARGET, BODY, upstream_sender=first, sms_sender=sms)
+    sms.assert_not_called()
+
+
+def test_invalid_structured_fallback_state_is_rejected() -> None:
+    with pytest.raises(ValueError):
+        outcome(
+            AttemptState.UNKNOWN,
+            DeliveryService.IMESSAGE,
+            fallback_permitted=True,
+        )
+
+
+def test_exact_message_is_escaped_before_submission() -> None:
+    assert escape_applescript('first "line"\\path\nsecond\tline') == (
+        'first \\"line\\"\\\\path\\nsecond\\tline'
+    )
 
 
 def test_osascript_receives_payload_only_over_stdin() -> None:
@@ -305,13 +290,13 @@ def test_osascript_receives_payload_only_over_stdin() -> None:
         stdout="success:iMessage\n",
         stderr="",
     )
-    script = 'send "private body" to participant "+14155551234"'
+    script = f'send "private body" to participant "{TARGET}"'
 
     with patch("subprocess.run", return_value=completed) as mocked_run:
         assert run_applescript(script) == "success:iMessage"
 
     assert mocked_run.call_args.args[0] == ["osascript", "-"]
-    assert "+14155551234" not in mocked_run.call_args.args[0]
+    assert TARGET not in mocked_run.call_args.args[0]
     assert "private body" not in mocked_run.call_args.args[0]
     assert mocked_run.call_args.kwargs["input"] == script
     assert "env" not in mocked_run.call_args.kwargs
@@ -326,12 +311,12 @@ def test_platform_errors_are_redacted() -> None:
     )
 
     with patch("subprocess.run", return_value=completed):
-        assert (
-            run_applescript("private script") == "Error: AppleScript automation failed"
+        assert run_applescript("private script") == (
+            "Error: AppleScript automation failed"
         )
 
 
-def test_timeout_is_reported_without_retrying() -> None:
+def test_apple_script_process_timeout_remains_thirty_seconds() -> None:
     with patch(
         "subprocess.run",
         side_effect=subprocess.TimeoutExpired(cmd=["osascript", "-"], timeout=30),

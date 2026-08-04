@@ -1,7 +1,7 @@
 # Delivery Observation and SMS/RCS Fallback Plan
 
-**Status:** Proposed; implementation, deployment, and live sends are not authorized by
-this document.
+**Status:** Implemented in source; deployment and live sends remain separately gated
+and are not authorized by this document.
 
 ## Goal
 

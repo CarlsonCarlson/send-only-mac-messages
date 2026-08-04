@@ -12,5 +12,7 @@
   bearer/digest authentication, strict origin checks, and sender attestation.
 - Add owner-only bearer create, replace, and revoke tooling plus launchd and
   Cloudflare deployment templates.
-- Cherry-pick upstream's read-only, six-second delivery verifier from `1a8f309`
-  verbatim, without adding another MCP tool or retaining message state.
+- Adapt upstream's delivery verifier into an exact, read-only ten-second observer
+  without adding another MCP tool or retaining message state.
+- Try SMS/RCS exactly once after a synchronous or exactly correlated definitive
+  iMessage failure; unknown and timeout outcomes remain non-retryable.

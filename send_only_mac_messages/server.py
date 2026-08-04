@@ -36,7 +36,7 @@ def tool_send_message(
         Field(description="Exact text body to send through Messages.app."),
     ],
 ) -> str:
-    """Send using upstream's iMessage-first sender with immediate SMS fallback."""
+    """Send iMessage-first, observing each attempt before one allowed SMS fallback."""
     logger.info("Submitting one outbound Messages request")
     return send_message(recipient, message)
 
@@ -50,9 +50,10 @@ def create_mcp(
     """Create the one-tool MCP surface for either stdio or remote transport."""
     instructions = (
         "Send a message to an exact phone number through macOS Messages. "
-        "It uses upstream's iMessage-first sender with immediate SMS fallback. "
-        "It can transiently observe only the correlated outgoing status for that "
-        "send; it cannot read conversations, contacts, chats, or attachments."
+        "It observes the exact iMessage attempt for up to ten seconds and may try "
+        "SMS/RCS exactly once only after a definitive iMessage failure. It can "
+        "transiently observe only the correlated outgoing status for that send; "
+        "it cannot read conversations, contacts, chats, or attachments."
     )
     if remote_instructions:
         instructions = f"{instructions} {remote_instructions}"

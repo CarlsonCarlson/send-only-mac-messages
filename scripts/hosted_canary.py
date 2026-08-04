@@ -35,18 +35,18 @@ def classify_result(result: object) -> tuple[str, str | None]:
     for service in ("iMessage", "SMS"):
         if texts == [f"delivered:{service}"]:
             return "delivered", service
-    for result_class, reasons in {
-        "sent-unconfirmed": ("delivery-timeout",),
-        "accepted-unverified": (
+    for service in ("iMessage", "SMS"):
+        if texts == [f"sent-unconfirmed:{service}:delivery-timeout"]:
+            return "sent-unconfirmed", service
+        for reason in (
             "database-unavailable",
             "message-not-correlated",
-            "status-pending",
-        ),
-    }.items():
-        for service in ("iMessage", "SMS"):
-            for reason in reasons:
-                if texts == [f"{result_class}:{service}:{reason}"]:
-                    return result_class, service
+            "send-state-timeout",
+        ):
+            if texts == [f"error:send_status_unknown:{service}:{reason}"]:
+                return "send-status-unknown", service
+        if texts == [f"error:send_failed:{service}"]:
+            return "send-failed", service
     return "error", None
 
 
@@ -106,7 +106,6 @@ async def run(smoke_only: bool) -> int:
                 send_reached_messages = result_class in {
                     "delivered",
                     "sent-unconfirmed",
-                    "accepted-unverified",
                 }
                 emit(
                     "send_finished",

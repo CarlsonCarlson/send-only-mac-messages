@@ -27,12 +27,12 @@ observation for the message it just submitted.
 _Avoid_: Shared history reader, searchable sender
 
 **Transient send observation**:
-A six-second, in-call `chat.db` observation restricted to recent outgoing candidates
-for the supplied phone number and send time. The observer prefers
-an exact body match, then falls back to the newest candidate for that recipient. The
-adapted verifier continues past `is_sent` until delivery, failure, or timeout. It
-returns fixed status tokens and retains no row, GUID, recipient, body, or attempt
-identifier after the call.
+A ten-second, in-call `chat.db` observation restricted to one outgoing attempt. Exact
+correlation requires the recipient or a normalized handle variant, the attempt start
+time, the exact plain or decoded attributed body, and the expected transport. The
+observer pins the matched row identifier for later polls and never treats the newest
+recipient row as evidence. It returns fixed status tokens and retains no row, GUID,
+recipient, body, or attempt identifier after the call.
 _Avoid_: Message history, delivery database, later status lookup
 
 **Conversation visibility**:
@@ -54,17 +54,17 @@ _Avoid_: Heimdall-authorized sender, Heimdall send clearance
 
 **Messages delivery service**:
 The Apple Messages transport selected for an outbound phone number. The adapter tries
-iMessage first and uses the upstream AppleScript's immediate SMS/RCS fallback when
-the iMessage AppleScript block errors. A later failure reported by the transient
-observer is returned to the caller and does not trigger another send attempt.
+iMessage first. A synchronous AppleScript failure or an exactly correlated definitive
+iMessage failure permits exactly one SMS/RCS attempt inside the same authorized call.
+Each attempt has its own start time and ten-second observation window. Every unknown
+or ambiguous outcome stops without fallback.
 _Avoid_: iMessage-only sender
 
-**Accepted-unverified**:
-A fixed result meaning Messages.app accepted the AppleScript command through iMessage
-or SMS, but the transient observer could not resolve a correlated status. Its fixed
-reason is `database-unavailable`, `message-not-correlated`, or `status-pending`. It
-does not claim delivery or human receipt.
-_Avoid_: Sent, delivered, receipt-confirmed
+**Send status unknown**:
+A fixed error result meaning the adapter cannot safely classify one submitted attempt.
+Its reason is `database-unavailable`, `message-not-correlated`, or
+`send-state-timeout`. It never authorizes automatic fallback or retry.
+_Avoid_: Accepted, failed, retryable
 
 **Sent-unconfirmed**:
 A fixed result meaning the correlated outgoing row was marked sent, but its delivery

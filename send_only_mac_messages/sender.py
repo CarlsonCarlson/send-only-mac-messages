@@ -6,7 +6,12 @@ import re
 from collections.abc import Callable
 
 from send_only_mac_messages.upstream_messages import (
+    AttemptOutcome,
+    AttemptState,
+    CorrelationConfidence,
+    OutcomeReason,
     _send_message_direct,
+    _send_message_sms,
     escape_applescript,
     run_applescript,
 )
@@ -15,13 +20,6 @@ MAX_MESSAGE_CHARS = 4_000
 
 _PHONE_INPUT = re.compile(r"\+?[0-9 ()-]+\Z")
 _UPSTREAM_DISPLAY_NAME = "recipient"
-_UPSTREAM_OUTCOME = re.compile(
-    r"^Message (delivered|sent) successfully via (iMessage|iMessageLite|SMS|RCS) "
-)
-_UPSTREAM_ASYNC_FAILURE = re.compile(
-    r"^Error: message to recipient failed to send .*service "
-    r"(iMessage|iMessageLite|SMS|RCS)\)"
-)
 
 
 def normalize_phone_number(recipient: str) -> str:
@@ -40,41 +38,37 @@ def normalize_phone_number(recipient: str) -> str:
     return f"+{digits}"
 
 
-def _service_token(service: str) -> str:
-    return "SMS" if service in {"SMS", "RCS"} else "iMessage"
-
-
-def _redact_upstream_outcome(outcome: object) -> str:
-    """Translate upstream's human-readable result into this MCP's fixed tokens."""
-    if not isinstance(outcome, str):
+def _render_outcome(outcome: object) -> str:
+    """Convert one structured attempt result to a fixed, redacted public token."""
+    if isinstance(outcome, AttemptOutcome):
+        service = outcome.service.value
+        if (
+            outcome.state is AttemptState.DELIVERED
+            and outcome.correlation is CorrelationConfidence.EXACT
+            and outcome.reason is None
+        ):
+            return f"delivered:{service}"
+        if (
+            outcome.state is AttemptState.SENT_UNCONFIRMED
+            and outcome.correlation is CorrelationConfidence.EXACT
+            and outcome.reason is OutcomeReason.DELIVERY_TIMEOUT
+        ):
+            return f"sent-unconfirmed:{service}:delivery-timeout"
+        if outcome.state is AttemptState.UNKNOWN and outcome.reason in {
+            OutcomeReason.DATABASE_UNAVAILABLE,
+            OutcomeReason.MESSAGE_NOT_CORRELATED,
+            OutcomeReason.SEND_STATE_TIMEOUT,
+        }:
+            return f"error:send_status_unknown:{service}:{outcome.reason.value}"
+        if outcome.state is AttemptState.FAILED:
+            return f"error:send_failed:{service}"
         return "error:unexpected_result"
 
-    match = _UPSTREAM_OUTCOME.match(outcome)
-    if match is not None:
-        state, service = match.groups()
-        if state == "delivered":
-            return f"delivered:{_service_token(service)}"
-        return f"sent-unconfirmed:{_service_token(service)}:delivery-timeout"
-
-    if outcome.startswith(
-        f"Message to {_UPSTREAM_DISPLAY_NAME} was handed to Messages.app via "
-    ):
-        service = "SMS" if " via SMS," in outcome else "iMessage"
-        if "Messages database was unavailable" in outcome:
-            return f"accepted-unverified:{service}:database-unavailable"
-        if "no matching message row appeared" in outcome:
-            return f"accepted-unverified:{service}:message-not-correlated"
-        if "matching message row remained pending" in outcome:
-            return f"accepted-unverified:{service}:status-pending"
-        return "error:unexpected_result"
-
-    failure = _UPSTREAM_ASYNC_FAILURE.match(outcome)
-    if failure is not None:
-        return f"error:send_failed:{_service_token(failure.group(1))}"
-    if outcome.startswith("Error"):
-        return "error:send_failed"
-    if outcome.startswith("Unknown"):
-        return "error:unexpected_result"
+    if isinstance(outcome, str):
+        if outcome.startswith("Error: AppleScript timed out"):
+            return "error:timeout"
+        if outcome == "Error: AppleScript automation failed":
+            return "error:automation_failed"
     return "error:unexpected_result"
 
 
@@ -82,9 +76,10 @@ def send_message(
     recipient: str,
     message: str,
     *,
-    upstream_sender: Callable[[str, str, str, bool], str] = _send_message_direct,
+    upstream_sender: Callable[[str, str, str, bool], object] = _send_message_direct,
+    sms_sender: Callable[[str, str, str], object] = _send_message_sms,
 ) -> str:
-    """Validate the send-only input, then invoke the cherry-picked upstream sender."""
+    """Validate one send and allow one SMS fallback only for definitive failure."""
     try:
         normalized_recipient = normalize_phone_number(recipient)
     except ValueError:
@@ -101,4 +96,6 @@ def send_message(
         _UPSTREAM_DISPLAY_NAME,
         False,
     )
-    return _redact_upstream_outcome(outcome)
+    if isinstance(outcome, AttemptOutcome) and outcome.fallback_permitted:
+        outcome = sms_sender(normalized_recipient, message, _UPSTREAM_DISPLAY_NAME)
+    return _render_outcome(outcome)

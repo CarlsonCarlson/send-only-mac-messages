@@ -7,6 +7,7 @@ import getpass
 import hashlib
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -17,11 +18,13 @@ import pytest
 from send_only_mac_messages.auth import BearerVerifier
 from send_only_mac_messages.remote import (
     MCP_REQUEST_BODY_CAP,
+    REMOTE_RESULT_BUSY,
     REMOTE_RESULT_SENDER_MISMATCH,
     AuthenticatedRemoteMCP,
     RemoteConfigurationError,
     RemoteServerSettings,
     SenderAttestor,
+    SerializedRemoteSender,
     create_remote_application,
 )
 
@@ -153,7 +156,9 @@ def test_remote_tool_description_exposes_sms_fallback_contract() -> None:
 
 
 def test_authenticated_tool_call_attests_sender_and_returns_sender_label() -> None:
-    sender = Mock(return_value="accepted-unverified:iMessage:message-not-correlated")
+    sender = Mock(
+        return_value="error:send_status_unknown:iMessage:message-not-correlated"
+    )
     attestor = SenderAttestor(
         logical_sender=LOGICAL_SENDER,
         expected_uid=501,
@@ -168,7 +173,7 @@ def test_authenticated_tool_call_attests_sender_and_returns_sender_label() -> No
     result = response.json()["result"]["structuredContent"]
     assert result == {
         "sender": LOGICAL_SENDER,
-        "result": "accepted-unverified:iMessage:message-not-correlated",
+        "result": "error:send_status_unknown:iMessage:message-not-correlated",
     }
     sender.assert_called_once_with("+14155551234", "private body")
     assert "+14155551234" not in response.text
@@ -176,7 +181,9 @@ def test_authenticated_tool_call_attests_sender_and_returns_sender_label() -> No
 
 
 def test_sender_attestation_failure_never_invokes_messages() -> None:
-    sender = Mock(return_value="accepted-unverified:iMessage:message-not-correlated")
+    sender = Mock(
+        return_value="error:send_status_unknown:iMessage:message-not-correlated"
+    )
     attestor = SenderAttestor(
         logical_sender=LOGICAL_SENDER,
         expected_uid=501,
@@ -193,6 +200,38 @@ def test_sender_attestation_failure_never_invokes_messages() -> None:
         "result": REMOTE_RESULT_SENDER_MISMATCH,
     }
     sender.assert_not_called()
+
+
+def test_remote_sender_remains_serialized_during_long_observation() -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    first_result: list[dict[str, str]] = []
+
+    def slow_sender(_recipient: str, _message: str) -> str:
+        entered.set()
+        if not release.wait(timeout=2):
+            raise RuntimeError("test did not release sender")
+        return "delivered:iMessage"
+
+    attestor = Mock()
+    attestor.attest.return_value = True
+    serialized = SerializedRemoteSender(
+        logical_sender=LOGICAL_SENDER,
+        attestor=attestor,
+        sender=slow_sender,
+    )
+
+    first = threading.Thread(
+        target=lambda: first_result.append(serialized("recipient", "body"))
+    )
+    first.start()
+    assert entered.wait(timeout=1)
+    second = serialized("recipient", "body")
+    release.set()
+    first.join(timeout=1)
+
+    assert first_result == [{"sender": LOGICAL_SENDER, "result": "delivered:iMessage"}]
+    assert second == {"sender": LOGICAL_SENDER, "result": REMOTE_RESULT_BUSY}
 
 
 def _build_app(

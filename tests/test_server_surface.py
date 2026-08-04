@@ -18,7 +18,7 @@ def test_mcp_exposes_exactly_one_send_tool() -> None:
 
     assert [tool.name for tool in tools] == ["tool_send_message"]
     assert tools[0].description is not None
-    assert "immediate SMS fallback" in tools[0].description
+    assert "one allowed SMS fallback" in tools[0].description
     assert set(tools[0].inputSchema["properties"]) == {"recipient", "message"}
     assert tools[0].annotations is not None
     assert tools[0].annotations.readOnlyHint is False
@@ -49,7 +49,8 @@ def test_only_upstream_subset_contains_local_messages_database_access() -> None:
     assert "FROM message" in observer
     assert "JOIN handle" in observer
     assert "m.is_from_me = 1" in observer
-    assert "LIMIT 10" in observer
+    assert "LIMIT 20" in observer
+    assert "m.ROWID = ?" in observer
     for forbidden in (
         "FROM chat",
         "FROM attachment",
@@ -74,10 +75,10 @@ def test_tool_logs_and_result_do_not_echo_send_data(caplog) -> None:
 
     with patch(
         "send_only_mac_messages.server.send_message",
-        return_value="accepted-unverified:iMessage:message-not-correlated",
+        return_value="error:send_status_unknown:iMessage:message-not-correlated",
     ):
         result = tool_send_message(recipient, message)
 
-    assert result == "accepted-unverified:iMessage:message-not-correlated"
+    assert result == "error:send_status_unknown:iMessage:message-not-correlated"
     assert recipient not in caplog.text
     assert message not in caplog.text

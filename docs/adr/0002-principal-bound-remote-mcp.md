@@ -56,10 +56,10 @@ logical label per sending principal. The process must be a per-user graphical
 LaunchAgent or GUI application, never a system LaunchDaemon or SSH child.
 
 Remote results add the configured logical sender label around the adapter's fixed
-result token. `accepted-unverified` retains its ADR-0001 meaning and never claims
-delivery. The server exposes one destructive, non-idempotent tool and serializes
-send execution. A client must not automatically retry a timeout, interruption,
-error, or missing response.
+ADR-0005 result token. The server exposes one destructive, non-idempotent tool and
+serializes send execution, including the longer two-transport path. A client must
+not automatically retry an unknown result, timeout, interruption, error, or missing
+response.
 
 Explicit send approval remains outside bearer authentication. Local Codex must keep
 the tool on per-call prompt. An unattended workflow requires its own approved-action

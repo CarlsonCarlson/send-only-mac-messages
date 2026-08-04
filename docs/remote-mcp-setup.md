@@ -3,9 +3,9 @@
 This deployment mirrors Heimdall's private remote-MCP authentication: one fixed
 bearer, only its SHA-256 digest on the hosted Mac, and stateless Streamable HTTP
 behind a dedicated Cloudflare hostname. It does not authorize a particular send.
-Delivery results come only from the narrow, transient observer described in ADR-0003.
-The internal SMS fallback is upstream's immediate AppleScript fallback. Neither
-result proves human receipt.
+Delivery results come only from the narrow, transient observer described in ADR-0005.
+The server may make one SMS/RCS attempt after a synchronous or exactly correlated
+definitive iMessage failure. Neither result proves human receipt.
 
 No command in this guide invokes Messages.app. A live canary remains a separate,
 explicitly approved action.
@@ -47,9 +47,9 @@ effective user. It binds only to `127.0.0.1`.
 The exact responsible runtime also needs Full Disk Access for transient delivery
 observation. A grant proven for Terminal does not by itself prove that a LaunchAgent
 process can read `~/Library/Messages/chat.db`. If the database is unavailable, sends
-remain possible but return `accepted-unverified` rather than a stronger status, and
-an accepted iMessage will not fall back to SMS. The fixed suffix
-`database-unavailable` distinguishes this case from `message-not-correlated`.
+remain possible but return `error:send_status_unknown:<service>:database-unavailable`,
+and the call stops without another attempt. The fixed suffix distinguishes this case
+from `message-not-correlated` and `send-state-timeout`.
 
 ## 3. Create the bearer
 
@@ -155,7 +155,8 @@ default_tools_approval_mode = "prompt"
 
 Restart Codex after changing its environment or MCP configuration. Verify
 authenticated initialization and tool discovery first. Do not invoke the tool as a
-connectivity test.
+connectivity test. Configure the MCP client or calling agent with at least a 40-second
+tool-call budget; the longest normal two-transport path is approximately 23 seconds.
 
 ## 7. Add a managed cloud agent later
 
@@ -167,8 +168,8 @@ The cloud secret manager must inject the raw bearer into the MCP client's
 `Authorization` header and the client must send the same non-secret
 `X-Expected-Sender` label. Authentication still does not replace explicit send
 approval. An unattended caller must not automatically retry a timeout, interruption,
-error, or missing response until a separate idempotency/attempt-ledger contract is
-implemented.
+unknown result, or missing response until a separate idempotency/attempt-ledger
+contract is implemented.
 
 ## Live-send gate
 

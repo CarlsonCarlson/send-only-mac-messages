@@ -1,6 +1,6 @@
 # ADR-0004: Preserve transient delivery observation outcomes
 
-**Status:** Accepted
+**Status:** Accepted; timing, outcomes, and fallback superseded by ADR-0005
 
 ## Context
 

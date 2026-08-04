@@ -6,8 +6,8 @@ Upstream provenance:
 
 Most marked function bodies come from ``mac_messages_mcp/messages.py`` at
 ``a6e4605``. The local transport adapter preserves this fork's stdin-only payload
-boundary and redacts subprocess errors. The transient observer intentionally keeps
-polling after ``is_sent`` and preserves fixed unverified reasons per ADR-0004.
+boundary and redacts subprocess errors. ADR-0005 replaces the upstream correlation
+heuristic with an exact, row-pinned observer and a structured one-fallback policy.
 """
 
 # isort: skip_file
@@ -17,6 +17,7 @@ import os
 import sqlite3
 import subprocess
 import time
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -225,11 +226,78 @@ def _get_phone_formats(recipient: str) -> List[str]:
 
 
 APPLE_EPOCH_OFFSET = 978307200  # seconds between the unix epoch and 2001-01-01
+OBSERVATION_TIMEOUT_SECONDS = 10.0
+OBSERVATION_POLL_SECONDS = 0.5
 
 
-class _ObservationFailure(Enum):
+class DeliveryService(Enum):
+    IMESSAGE = "iMessage"
+    SMS = "SMS"
+
+
+class AttemptState(Enum):
+    DELIVERED = "delivered"
+    SENT_UNCONFIRMED = "sent-unconfirmed"
+    UNKNOWN = "unknown"
+    FAILED = "failed"
+
+
+class CorrelationConfidence(Enum):
+    EXACT = "exact"
+    NONE = "none"
+
+
+class OutcomeReason(Enum):
     DATABASE_UNAVAILABLE = "database-unavailable"
-    STATUS_PENDING = "status-pending"
+    MESSAGE_NOT_CORRELATED = "message-not-correlated"
+    SEND_STATE_TIMEOUT = "send-state-timeout"
+    DELIVERY_TIMEOUT = "delivery-timeout"
+
+
+@dataclass(frozen=True)
+class AttemptOutcome:
+    """Redaction-safe internal result for one transport attempt."""
+
+    state: AttemptState
+    service: DeliveryService
+    correlation: CorrelationConfidence
+    reason: Optional[OutcomeReason] = None
+    fallback_permitted: bool = False
+
+    def __post_init__(self) -> None:
+        if self.fallback_permitted and not (
+            self.state is AttemptState.FAILED
+            and self.service is DeliveryService.IMESSAGE
+            and self.correlation is CorrelationConfidence.EXACT
+        ):
+            raise ValueError("fallback requires an exactly correlated iMessage failure")
+        if (
+            self.state is AttemptState.FAILED
+            and self.service is DeliveryService.IMESSAGE
+            and self.correlation is CorrelationConfidence.EXACT
+            and not self.fallback_permitted
+        ):
+            raise ValueError("an exactly correlated iMessage failure requires fallback")
+
+
+def _outcome(
+    state: AttemptState,
+    service: DeliveryService,
+    *,
+    correlation: CorrelationConfidence,
+    reason: Optional[OutcomeReason] = None,
+) -> AttemptOutcome:
+    return AttemptOutcome(
+        state=state,
+        service=service,
+        correlation=correlation,
+        reason=reason,
+        fallback_permitted=(
+            state is AttemptState.FAILED
+            and service is DeliveryService.IMESSAGE
+            and correlation is CorrelationConfidence.EXACT
+        ),
+    )
 
 
 def _candidate_handles(recipient: str) -> List[str]:
@@ -256,12 +324,21 @@ def _row_text(row: Dict[str, Any]) -> Optional[str]:
     return extract_body_from_attributed(row.get("attributedBody"))
 
 
+def _database_service_matches(value: object, expected: DeliveryService) -> bool:
+    if not isinstance(value, str):
+        return False
+    if expected is DeliveryService.IMESSAGE:
+        return value in {"iMessage", "iMessageLite"}
+    return value in {"SMS", "RCS"}
+
+
 def _verify_send_in_db(
     recipient: str,
     sent_after_unix: float,
-    message_text: Optional[str] = None,
-    timeout: float = 6.0,
-) -> Union[Dict[str, Any], _ObservationFailure, None]:
+    message_text: str,
+    service: DeliveryService,
+    timeout: float = OBSERVATION_TIMEOUT_SECONDS,
+) -> AttemptOutcome:
     """
     Poll the Messages database for the outbound message to `recipient`
     recorded after `sent_after_unix`.
@@ -273,131 +350,177 @@ def _verify_send_in_db(
     chat.db's message.error / message.is_sent columns, which are populated
     within a second or two of the attempt.
 
-    `sent_after_unix` alone is not a reliable correlation key: two sends to
-    the same handle close together (e.g. rapid-fire tool calls) can both be
-    "the latest row after time X" from either call's point of view, so a
-    plain `ORDER BY date DESC LIMIT 1` can report the outcome of the wrong
-    message. When `message_text` is given, matching rows are additionally
-    filtered by exact body match (decoding attributedBody when `text` is
-    NULL) so each call correlates to *its own* send rather than whichever
-    row happens to be newest. If nothing matches the body (e.g. Messages
-    re-encoded the text, or the row only has an attachment), we fall back to
-    the plain latest-row behavior rather than reporting a false negative.
-
-    Returns the terminal row or last row observed as sent. Otherwise returns a typed
-    database-unavailable or status-pending state, or None for message-not-correlated.
+    Correlation requires the exact body, recipient variant, attempt start time, and
+    expected transport. Once found, the row id is pinned for the rest of the attempt.
+    A newer recipient row or a body mismatch can never resolve the attempt.
     """
     apple_ns = int((sent_after_unix - APPLE_EPOCH_OFFSET - 1) * 1_000_000_000)
-    database_unavailable = False
+    handles = _candidate_handles(recipient)
 
-    def _matching_rows(handles: List[str]) -> List[Dict[str, Any]]:
-        nonlocal database_unavailable
+    def _candidate_rows() -> Union[List[Dict[str, Any]], None]:
         placeholders = ", ".join("?" for _ in handles)
-        # m.error is aliased to send_error so a real row can't be mistaken
-        # for query_messages_db's {"error": ...} failure dict.
         query = f"""
-            SELECT m.guid, m.error AS send_error, m.is_sent, m.is_delivered,
-                   m.service, m.text, m.attributedBody
+            SELECT m.ROWID AS row_id, m.guid, m.error AS send_error,
+                   m.is_sent, m.is_delivered, m.service, m.text,
+                   m.attributedBody, h.id AS handle
             FROM message m
             JOIN handle h ON m.handle_id = h.ROWID
             WHERE m.is_from_me = 1
               AND h.id IN ({placeholders})
               AND m.date >= ?
-            ORDER BY m.date DESC
-            LIMIT 10
+            ORDER BY m.date ASC
+            LIMIT 20
         """
         results = query_messages_db(query, tuple(handles) + (apple_ns,))
-        if results and "guid" in results[0]:
-            return results
         if results and "error" in results[0]:
-            database_unavailable = True
-        return []
-
-    def _best_row(handles: List[str]) -> Optional[Dict[str, Any]]:
-        rows = _matching_rows(handles)
-        if not rows:
             return None
-        if message_text is not None:
-            for row in rows:
-                if _row_text(row) == message_text:
-                    return row
-            # No row's body matched this send -- fall back to the newest row
-            # rather than reporting nothing (e.g. attachment-only messages,
-            # or Messages normalizing the text on write).
-        return rows[0]
+        return results
 
-    exact = [recipient.strip()]
-    variants = _candidate_handles(recipient)
-    deadline = time.time() + timeout
-    row = None
-    last_sent_row = None
-    pending_row_seen = False
-    while time.time() < deadline:
-        # Prefer the exact handle the send targeted; only widen to format
-        # variants when the exact handle has no row (Messages sometimes
-        # records the handle in a different format than it was given).
-        row = _best_row(exact) or _best_row(variants)
+    def _pinned_row(row_id: int) -> Union[Dict[str, Any], None, bool]:
+        results = query_messages_db(
+            """
+            SELECT m.ROWID AS row_id, m.guid, m.error AS send_error,
+                   m.is_sent, m.is_delivered, m.service, m.text,
+                   m.attributedBody, h.id AS handle
+            FROM message m
+            JOIN handle h ON m.handle_id = h.ROWID
+            WHERE m.ROWID = ? AND m.is_from_me = 1
+            LIMIT 1
+            """,
+            (row_id,),
+        )
+        if results and "error" in results[0]:
+            return False
+        if not results:
+            return None
+        return results[0]
+
+    deadline = time.monotonic() + timeout
+    pinned_row_id = None
+    saw_sent = False
+    while time.monotonic() < deadline:
+        if pinned_row_id is None:
+            rows = _candidate_rows()
+            if rows is None:
+                return _outcome(
+                    AttemptState.UNKNOWN,
+                    service,
+                    correlation=CorrelationConfidence.NONE,
+                    reason=OutcomeReason.DATABASE_UNAVAILABLE,
+                )
+            exact_rows = [
+                row
+                for row in rows
+                if _row_text(row) == message_text
+                and row.get("handle") in handles
+                and _database_service_matches(row.get("service"), service)
+            ]
+            if len(exact_rows) > 1:
+                return _outcome(
+                    AttemptState.UNKNOWN,
+                    service,
+                    correlation=CorrelationConfidence.NONE,
+                    reason=OutcomeReason.MESSAGE_NOT_CORRELATED,
+                )
+            row = exact_rows[0] if exact_rows else None
+            if row is not None:
+                pinned_row_id = row.get("row_id")
+                if not isinstance(pinned_row_id, int) or isinstance(
+                    pinned_row_id, bool
+                ):
+                    return _outcome(
+                        AttemptState.UNKNOWN,
+                        service,
+                        correlation=CorrelationConfidence.NONE,
+                        reason=OutcomeReason.MESSAGE_NOT_CORRELATED,
+                    )
+        else:
+            row = _pinned_row(pinned_row_id)
+            if row is False:
+                return _outcome(
+                    AttemptState.UNKNOWN,
+                    service,
+                    correlation=CorrelationConfidence.EXACT,
+                    reason=OutcomeReason.DATABASE_UNAVAILABLE,
+                )
+            if row is None:
+                return _outcome(
+                    AttemptState.UNKNOWN,
+                    service,
+                    correlation=CorrelationConfidence.NONE,
+                    reason=OutcomeReason.MESSAGE_NOT_CORRELATED,
+                )
+
         if row is not None:
-            # A sent flag can precede the delivery flag, so keep polling until
-            # delivery, failure, or the observation window ends.
-            if row.get("send_error") or row.get("is_delivered"):
-                return row
+            if (
+                _row_text(row) != message_text
+                or row.get("handle") not in handles
+                or not _database_service_matches(row.get("service"), service)
+            ):
+                return _outcome(
+                    AttemptState.UNKNOWN,
+                    service,
+                    correlation=CorrelationConfidence.NONE,
+                    reason=OutcomeReason.MESSAGE_NOT_CORRELATED,
+                )
+            if row.get("is_delivered"):
+                return _outcome(
+                    AttemptState.DELIVERED,
+                    service,
+                    correlation=CorrelationConfidence.EXACT,
+                )
+            if row.get("send_error"):
+                return _outcome(
+                    AttemptState.FAILED,
+                    service,
+                    correlation=CorrelationConfidence.EXACT,
+                )
             if row.get("is_sent"):
-                last_sent_row = row
-            else:
-                pending_row_seen = True
-        time.sleep(0.5)
-    if last_sent_row is not None:
-        return last_sent_row
-    if database_unavailable:
-        return _ObservationFailure.DATABASE_UNAVAILABLE
-    if pending_row_seen:
-        return _ObservationFailure.STATUS_PENDING
-    return None
+                saw_sent = True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(OBSERVATION_POLL_SECONDS, remaining))
+
+    if pinned_row_id is None:
+        return _outcome(
+            AttemptState.UNKNOWN,
+            service,
+            correlation=CorrelationConfidence.NONE,
+            reason=OutcomeReason.MESSAGE_NOT_CORRELATED,
+        )
+    if saw_sent:
+        return _outcome(
+            AttemptState.SENT_UNCONFIRMED,
+            service,
+            correlation=CorrelationConfidence.EXACT,
+            reason=OutcomeReason.DELIVERY_TIMEOUT,
+        )
+    return _outcome(
+        AttemptState.UNKNOWN,
+        service,
+        correlation=CorrelationConfidence.EXACT,
+        reason=OutcomeReason.SEND_STATE_TIMEOUT,
+    )
 
 
 def _report_send_outcome(
     recipient: str,
     display_name: str,
-    service: str,
+    service: DeliveryService,
     sent_after_unix: float,
-    message_text: Optional[str] = None,
-) -> str:
+    message_text: str,
+) -> AttemptOutcome:
     """
-    Turn the database verification result into the string returned to the
-    caller. Never claims success for a message the database says failed.
+    Return one structured, redaction-safe database observation outcome.
     """
-    row = _verify_send_in_db(recipient, sent_after_unix, message_text)
-    if row is None:
-        return (
-            f"Message to {display_name} was handed to Messages.app via {service}, "
-            "but delivery could not be verified because no matching message row "
-            "appeared during the observation window."
-        )
-    if row is _ObservationFailure.DATABASE_UNAVAILABLE:
-        return (
-            f"Message to {display_name} was handed to Messages.app via {service}, "
-            "but delivery could not be verified because the Messages database "
-            "was unavailable."
-        )
-    if row is _ObservationFailure.STATUS_PENDING:
-        return (
-            f"Message to {display_name} was handed to Messages.app via {service}, "
-            "but delivery could not be verified because the matching message row "
-            "remained pending for the observation window."
-        )
-    actual_service = row.get("service") or service
-    if row.get("send_error"):
-        return (
-            f"Error: message to {display_name} failed to send "
-            f"(Messages error code {row['send_error']}, service {actual_service}). "
-            f"The recipient may not be reachable via {actual_service}."
-        )
-    status = "delivered" if row.get("is_delivered") else "sent"
-    return f"Message {status} successfully via {actual_service} to {display_name}"
+    del display_name
+    return _verify_send_in_db(recipient, sent_after_unix, message_text, service)
 
 
-def _send_message_sms(recipient: str, message: str, contact_name: str = None) -> str:
+def _send_message_sms(
+    recipient: str, message: str, contact_name: str = None
+) -> Union[AttemptOutcome, str]:
     """
     Send message via SMS/RCS using AppleScript.
 
@@ -425,8 +548,8 @@ def _send_message_sms(recipient: str, message: str, contact_name: str = None) ->
             delay 1
             
             return "success"
-        on error errMsg
-            return "error:" & errMsg
+        on error
+            return "error:send_failed:SMS"
         end try
     end tell
     """
@@ -434,22 +557,28 @@ def _send_message_sms(recipient: str, message: str, contact_name: str = None) ->
     try:
         sent_at = time.time()
         result = run_applescript(script)
-        if result.startswith("error:"):
-            return f"Error sending SMS: {result[6:]}"
+        if result == "error:send_failed:SMS":
+            return _outcome(
+                AttemptState.FAILED,
+                DeliveryService.SMS,
+                correlation=CorrelationConfidence.NONE,
+            )
+        if result.startswith("Error: AppleScript"):
+            return result
         elif result.strip() == "success":
             display_name = contact_name if contact_name else recipient
             return _report_send_outcome(
-                recipient, display_name, "SMS", sent_at, message
+                recipient, display_name, DeliveryService.SMS, sent_at, message
             )
         else:
-            return f"Unknown SMS result: {result}"
-    except Exception as e:
-        return f"Error sending SMS: {str(e)}"
+            return "Unknown SMS result"
+    except Exception:
+        return "Error: AppleScript automation failed"
 
 
 def _send_message_direct(
     recipient: str, message: str, contact_name: str = None, group_chat: bool = False
-) -> str:
+) -> Union[AttemptOutcome, str]:
     """
     Enhanced direct AppleScript method for sending messages with SMS/RCS fallback.
 
@@ -509,50 +638,19 @@ def _send_message_direct(
         except Exception as e:
             return f"Error sending group message: {str(e)}"
 
-    # For individual messages, try iMessage first with automatic SMS fallback
-    # Enhanced AppleScript with built-in fallback logic
+    # For individual messages, try iMessage first. A synchronous AppleScript
+    # failure immediately invokes the SMS-only helper inside this authorized call.
+    # Keeping the attempts separate gives each transport its own start time.
     script = f"""
     tell application "Messages"
         try
-            -- First, try iMessage
             set targetService to 1st service whose service type = iMessage
-            
-            try
-                -- Try to get the existing participant if possible
-                set targetBuddy to participant "{safe_recipient}" of targetService
-                
-                -- Send the message via iMessage
-                send "{safe_message}" to targetBuddy
-                
-                -- Wait briefly to check for immediate errors
-                delay 2
-                
-                -- Return success with service type
-                return "success:iMessage"
-            on error iMessageErr
-                -- iMessage failed, try SMS fallback if recipient looks like a phone number
-                try
-                    -- Check if recipient looks like a phone number (contains digits)
-                    if "{safe_recipient}" contains "0" or "{safe_recipient}" contains "1" or "{safe_recipient}" contains "2" or "{safe_recipient}" contains "3" or "{safe_recipient}" contains "4" or "{safe_recipient}" contains "5" or "{safe_recipient}" contains "6" or "{safe_recipient}" contains "7" or "{safe_recipient}" contains "8" or "{safe_recipient}" contains "9" then
-                        -- Try SMS service
-                        set smsService to first account whose service type = SMS and enabled is true
-                        send "{safe_message}" to participant "{safe_recipient}" of smsService
-                        
-                        -- Wait briefly to check for immediate errors
-                        delay 2
-                        
-                        return "success:SMS"
-                    else
-                        -- Not a phone number, can't use SMS
-                        return "error:iMessage failed and SMS not available for email addresses - " & iMessageErr
-                    end if
-                on error smsErr
-                    -- Both iMessage and SMS failed
-                    return "error:Both iMessage and SMS failed - iMessage: " & iMessageErr & " SMS: " & smsErr
-                end try
-            end try
-        on error generalErr
-            return "error:" & generalErr
+            set targetBuddy to participant "{safe_recipient}" of targetService
+            send "{safe_message}" to targetBuddy
+            delay 2
+            return "success:iMessage"
+        on error
+            return "error:send_failed:iMessage"
         end try
     end tell
     """
@@ -562,24 +660,21 @@ def _send_message_direct(
         result = run_applescript(script)
         display_name = contact_name if contact_name else recipient
 
-        if result.startswith("error:"):
-            return f"Error sending message: {result[6:]}"
-        elif result.strip() == "success:iMessage":
+        if result == "error:send_failed:iMessage":
+            return _send_message_sms(recipient, message, contact_name)
+        if result.startswith("Error: AppleScript"):
+            return result
+        if result.strip() == "success:iMessage":
             return _report_send_outcome(
-                recipient, display_name, "iMessage", sent_at, message
+                recipient,
+                display_name,
+                DeliveryService.IMESSAGE,
+                sent_at,
+                message,
             )
-        elif result.strip() == "success:SMS":
-            return _report_send_outcome(
-                recipient, display_name, "SMS", sent_at, message
-            )
-        elif result.strip() == "success":
-            return _report_send_outcome(
-                recipient, display_name, "iMessage", sent_at, message
-            )
-        else:
-            return f"Unknown result: {result}"
-    except Exception as e:
-        return f"Error sending message: {str(e)}"
+        return "Unknown result"
+    except Exception:
+        return "Error: AppleScript automation failed"
 
 # fmt: on
 # END ADAPTED UPSTREAM SUBSET

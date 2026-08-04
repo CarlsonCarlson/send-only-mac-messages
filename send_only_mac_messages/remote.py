@@ -11,7 +11,7 @@ import pwd
 import re
 import threading
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import uvicorn
 from mcp.server.transport_security import TransportSecuritySettings
@@ -128,6 +128,36 @@ class SenderAttestor:
             return False
 
 
+@dataclass
+class SerializedRemoteSender:
+    """Hold the principal lock for the complete one- or two-transport call."""
+
+    logical_sender: str
+    attestor: SenderAttestor
+    sender: Callable[[str, str], str]
+    _send_lock: threading.Lock = field(default_factory=threading.Lock, init=False)
+
+    def __call__(self, recipient: str, message: str) -> dict[str, str]:
+        if not self.attestor.attest():
+            logger.error("Rejecting outbound request because sender attestation failed")
+            return {
+                "sender": self.logical_sender,
+                "result": REMOTE_RESULT_SENDER_MISMATCH,
+            }
+        if not self._send_lock.acquire(blocking=False):
+            return {
+                "sender": self.logical_sender,
+                "result": REMOTE_RESULT_BUSY,
+            }
+        try:
+            return {
+                "sender": self.logical_sender,
+                "result": self.sender(recipient, message),
+            }
+        finally:
+            self._send_lock.release()
+
+
 class AuthenticatedRemoteMCP:
     """Strict origin and bearer wrapper around the SDK's stateless MCP app."""
 
@@ -223,37 +253,25 @@ def create_remote_application(
         logical_sender=settings.logical_sender,
         expected_uid=settings.expected_uid,
     )
-    send_lock = threading.Lock()
+    serialized_sender = SerializedRemoteSender(
+        logical_sender=settings.logical_sender,
+        attestor=sender_attestor,
+        sender=sender,
+    )
 
     def remote_send_message(recipient: str, message: str) -> dict[str, str]:
-        """Send with upstream's iMessage-first and immediate SMS fallback."""
-        if not sender_attestor.attest():
-            logger.error("Rejecting outbound request because sender attestation failed")
-            return {
-                "sender": settings.logical_sender,
-                "result": REMOTE_RESULT_SENDER_MISMATCH,
-            }
-        if not send_lock.acquire(blocking=False):
-            return {
-                "sender": settings.logical_sender,
-                "result": REMOTE_RESULT_BUSY,
-            }
-        try:
-            return {
-                "sender": settings.logical_sender,
-                "result": sender(recipient, message),
-            }
-        finally:
-            send_lock.release()
+        """Serialize one iMessage-first call and its permitted SMS fallback."""
+        return serialized_sender(recipient, message)
 
     protocol_server = create_mcp(
         remote_send_message,
         structured_output=True,
         remote_instructions=(
-            "Every call requires explicit send authorization. The server may make one "
-            "upstream immediate SMS fallback inside the approved call. Clients "
-            "must never retry a tool-call error, timeout, interruption, or missing response; "
-            "the outcome may be unknown."
+            "Every call requires explicit send authorization and may take about 23 "
+            "seconds; clients should budget at least 40 seconds. The server may make "
+            "one SMS fallback inside the approved call only after a definitive iMessage "
+            "failure. Clients must never retry an unknown result, tool-call timeout, "
+            "interruption, or missing response."
         ),
     )
     protocol_server.settings.transport_security = TransportSecuritySettings(

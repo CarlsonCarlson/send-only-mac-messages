@@ -32,24 +32,28 @@ def test_classifies_only_allow_listed_send_outcome_tokens() -> None:
             [
                 Content(
                     "text",
-                    "accepted-unverified:SMS:message-not-correlated",
+                    "error:send_status_unknown:SMS:message-not-correlated",
                 )
             ]
         )
-    ) == ("accepted-unverified", "SMS")
+    ) == ("send-status-unknown", "SMS")
     assert classify_result(
         Result(
             [
                 Content(
                     "text",
-                    "accepted-unverified:iMessage:database-unavailable",
+                    "error:send_status_unknown:iMessage:database-unavailable",
                 )
             ]
         )
-    ) == ("accepted-unverified", "iMessage")
+    ) == ("send-status-unknown", "iMessage")
     assert classify_result(
-        Result([Content("text", "accepted-unverified:SMS:status-pending")])
-    ) == ("accepted-unverified", "SMS")
+        Result([Content("text", "error:send_status_unknown:SMS:send-state-timeout")])
+    ) == ("send-status-unknown", "SMS")
+    assert classify_result(Result([Content("text", "error:send_failed:SMS")])) == (
+        "send-failed",
+        "SMS",
+    )
 
 
 def test_rejects_raw_or_ambiguous_tool_results() -> None:
@@ -59,7 +63,7 @@ def test_rejects_raw_or_ambiguous_tool_results() -> None:
     )
     assert classify_result(Result([], isError=True)) == ("error", None)
     assert classify_result(
-        Result([Content("text", "accepted-unverified:iMessage:private-db-error")])
+        Result([Content("text", "error:send_status_unknown:iMessage:private-db-error")])
     ) == ("error", None)
     assert classify_result(Result([Content("text", "sent-unconfirmed:iMessage")])) == (
         "error",
