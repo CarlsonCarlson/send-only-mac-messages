@@ -1,6 +1,6 @@
 # ADR-0002: Authenticate one principal-bound remote MCP with one bearer
 
-**Status:** Accepted
+**Status:** Accepted; delivery-result clauses superseded by ADR-0003
 
 ## Context
 

@@ -2,8 +2,10 @@
 
 This deployment mirrors Heimdall's private remote-MCP authentication: one fixed
 bearer, only its SHA-256 digest on the hosted Mac, and stateless Streamable HTTP
-behind a dedicated Cloudflare hostname. It does not authorize a particular send or
-prove delivery.
+behind a dedicated Cloudflare hostname. It does not authorize a particular send.
+Delivery results come only from the narrow, transient observer described in ADR-0003.
+The internal SMS fallback is upstream's immediate AppleScript fallback. Neither
+result proves human receipt.
 
 No command in this guide invokes Messages.app. A live canary remains a separate,
 explicitly approved action.
@@ -41,6 +43,12 @@ uv build
 
 The remote entry point refuses to start unless its configured macOS user is the
 effective user. It binds only to `127.0.0.1`.
+
+The exact responsible runtime also needs Full Disk Access for transient delivery
+observation. A grant proven for Terminal does not by itself prove that a LaunchAgent
+process can read `~/Library/Messages/chat.db`. If the database is unavailable, sends
+remain possible but return `accepted-unverified` rather than a stronger status, and
+an accepted iMessage will not fall back to SMS.
 
 ## 3. Create the bearer
 
@@ -141,9 +149,7 @@ url = "https://__PUBLIC_HOST__/mcp"
 bearer_token_env_var = "MESSAGES_PRINCIPAL_A_MCP_BEARER"
 http_headers = { "X-Expected-Sender" = "__LOGICAL_SENDER__" }
 enabled_tools = ["tool_send_message"]
-
-[mcp_servers.messages_principal_a.tools.tool_send_message]
-approval_mode = "prompt"
+default_tools_approval_mode = "prompt"
 ```
 
 Restart Codex after changing its environment or MCP configuration. Verify

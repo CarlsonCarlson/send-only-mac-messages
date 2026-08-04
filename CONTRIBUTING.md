@@ -11,10 +11,12 @@ uv run mypy send_only_mac_messages
 uv build
 ```
 
-Tests must mock AppleScript and must never send a real message. Do not introduce
-message reads, Contacts access, chat or recipient discovery, attachments, database
-access, Full Disk Access, or a second MCP tool without an explicit architecture
-decision.
+Tests must mock AppleScript and must never send a real message. Database tests must
+use temporary fixtures and never open the user's live Messages database. Do not
+expand ADR-0003's transient delivery observer or the upstream immediate SMS fallback
+into history reads, Contacts access, chat or recipient discovery, attachments,
+arbitrary database access, retained send state, or a second MCP tool without another
+explicit architecture decision.
 
 Never commit real phone numbers, message bodies, credentials, raw AppleScript errors,
 or hosted-Mac secrets.

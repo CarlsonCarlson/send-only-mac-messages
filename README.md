@@ -1,7 +1,8 @@
 # Send-only Mac Messages
 
 A deliberately narrow MCP server for sending direct messages through macOS
-Messages.app. It exposes one tool and has no code path for reading local user data.
+Messages.app. It exposes one tool and transiently observes only the status of the
+message that tool just submitted.
 
 ## Boundary
 
@@ -10,20 +11,33 @@ Ten-digit US numbers are normalized with `+1`; international numbers may be pass
 E.164 form. Contact names, email addresses, contact selections, group identifiers,
 and recipient discovery are rejected.
 
-The repository contains no message-history queries, Contacts integration, chat
-listing, attachments, `chat.db` access, or Full Disk Access requirement. Heimdall is
-not part of the send path. Apple Blocked Contacts remains the platform-level delivery
-block; this adapter neither reads nor maintains a separate blocklist.
+The repository contains no general message-history query, Contacts integration, chat
+listing, attachments, or later status lookup. After a send is accepted, a fixed
+read-only `chat.db` query considers at most ten recent outgoing candidates for the
+same recipient and prefers the exact outbound body. It retains no database row or
+send identifier after the call. Heimdall is not part of the send path.
+
+Apple Blocked Contacts remains the platform-level delivery block; this adapter
+neither reads nor maintains a separate blocklist.
 
 ## Delivery behavior
 
-Each call tries iMessage first. If that AppleScript attempt fails immediately, it
-tries the enabled SMS service exposed by Messages.app. SMS/RCS from a Mac depends on
-the paired iPhone and Messages configuration described by
+Each call tries iMessage first. It tries the enabled SMS service if the AppleScript
+attempt fails immediately. This is the upstream SMS/RCS fallback from commit
+`f77be9e`; a later database-reported failure does not trigger another send attempt.
+It does not fall back after `sent-unconfirmed`, `accepted-unverified`, a timeout, or
+an interruption because the iMessage outcome could still be successful and a retry
+could duplicate the message.
+
+SMS/RCS from a Mac depends on the paired iPhone and Messages configuration described by
 [Apple's Text Message Forwarding documentation](https://support.apple.com/en-us/102545).
 
 Results are intentionally narrow:
 
+- `delivered:iMessage`
+- `delivered:SMS`
+- `sent-unconfirmed:iMessage`
+- `sent-unconfirmed:SMS`
 - `accepted-unverified:iMessage`
 - `accepted-unverified:SMS`
 - `rejected:invalid_recipient`
@@ -34,9 +48,16 @@ Results are intentionally narrow:
 - `error:automation_failed`
 - `error:unexpected_result`
 
-`accepted` means Messages.app accepted the AppleScript command. It does not claim
-delivery or human receipt because proving either would require a separate observation
-source; this adapter does not read the Messages database.
+The upstream transient observer polls every 500 milliseconds for at most six seconds.
+It searches recent outgoing rows using recipient and send time, prefers an exact body
+match, and retains upstream's newest-recipient-row fallback when no body matches.
+`delivered` means that the resolved Messages row reported delivery; it does not mean
+a human read the message.
+`sent-unconfirmed` means the row was marked sent before its delivery flag was present;
+the verbatim upstream verifier stops polling at that point. `accepted-unverified`
+means Messages accepted the command but the observer could not resolve a row or access
+the database. A simultaneous send to the same recipient remains ambiguous, especially
+when the body cannot be decoded; the upstream fallback may resolve the newest row.
 
 Recipient and message content are passed to `osascript` over standard input, not in
 process arguments or environment variables. Tool results and logs do not echo either
@@ -49,9 +70,12 @@ value.
 - [`uv`](https://docs.astral.sh/uv/)
 - Automation permission for the GUI application or Terminal process that launches the
   server to control Messages
+- Full Disk Access for the responsible process so it can read the correlated status
+  from `~/Library/Messages/chat.db`
 - For SMS/RCS fallback, the applicable paired-iPhone Messages configuration
 
-No Full Disk Access or Contacts permission is needed.
+No Contacts permission is needed. Full Disk Access is broader than the adapter's
+fixed query; macOS does not provide row-level permission for the Messages database.
 
 ## Run from source
 
@@ -93,7 +117,8 @@ digest on the Mac. It also requires an expected logical sender label and recheck
 effective and active-console user immediately before each send.
 
 Remote authentication does not authorize a particular message. Keep the tool on
-per-call approval, and never automatically retry a timeout or missing response.
+per-call approval, and never retry a tool-call timeout or missing response. The
+upstream immediate SMS fallback is part of the same approved call.
 See [the principal-bound remote setup guide](docs/remote-mcp-setup.md) and
 [ADR-0002](docs/adr/0002-principal-bound-remote-mcp.md).
 

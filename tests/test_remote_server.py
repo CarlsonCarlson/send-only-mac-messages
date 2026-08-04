@@ -131,6 +131,27 @@ def test_authenticated_initialize_reaches_one_tool_protocol_surface() -> None:
     assert response.json()["result"]["serverInfo"]["name"] == ("send-only-mac-messages")
 
 
+def test_remote_tool_description_exposes_sms_fallback_contract() -> None:
+    app = _build_app()
+
+    response = asyncio.run(
+        _post_json(
+            app,
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list",
+                "params": {},
+            },
+        )
+    )
+
+    assert response.status_code == 200
+    tools = response.json()["result"]["tools"]
+    assert [tool["name"] for tool in tools] == ["tool_send_message"]
+    assert "SMS fallback" in tools[0]["description"]
+
+
 def test_authenticated_tool_call_attests_sender_and_returns_sender_label() -> None:
     sender = Mock(return_value="accepted-unverified:iMessage")
     attestor = SenderAttestor(

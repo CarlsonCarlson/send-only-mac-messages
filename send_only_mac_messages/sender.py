@@ -1,34 +1,23 @@
-"""Narrow outbound-only integration with macOS Messages.app."""
+"""Send-only adapter around the cherry-picked upstream Messages implementation."""
 
 from __future__ import annotations
 
 import re
-import subprocess
 from collections.abc import Callable
 
-APPLESCRIPT_TIMEOUT_SECONDS = 30.0
+from send_only_mac_messages.upstream_messages import (
+    _send_message_direct,
+    escape_applescript,
+    run_applescript,
+)
+
 MAX_MESSAGE_CHARS = 4_000
 
-_ALLOWED_APPLESCRIPT_RESULTS = {
-    "accepted-unverified:iMessage",
-    "accepted-unverified:SMS",
-    "error:send_failed",
-}
 _PHONE_INPUT = re.compile(r"\+?[0-9 ()-]+\Z")
-
-
-def escape_applescript(value: str) -> str:
-    """Escape a value for an AppleScript double-quoted string literal."""
-    return (
-        value.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\r\n", "\\n")
-        .replace("\r", "\\n")
-        .replace("\n", "\\n")
-        .replace("\t", "\\t")
-        .replace("\u2028", "\\n")
-        .replace("\u2029", "\\n")
-    )
+_UPSTREAM_DISPLAY_NAME = "recipient"
+_UPSTREAM_OUTCOME = re.compile(
+    r"^Message (delivered|sent) successfully via (iMessage|iMessageLite|SMS|RCS) "
+)
 
 
 def normalize_phone_number(recipient: str) -> str:
@@ -47,58 +36,41 @@ def normalize_phone_number(recipient: str) -> str:
     return f"+{digits}"
 
 
-def run_applescript(script: str, timeout: float = APPLESCRIPT_TIMEOUT_SECONDS) -> str:
-    """Run AppleScript over stdin and return only an allow-listed result token."""
-    try:
-        completed = subprocess.run(
-            ["osascript", "-"],
-            input=script,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        return "error:timeout"
+def _service_token(service: str) -> str:
+    return "SMS" if service in {"SMS", "RCS"} else "iMessage"
 
-    if completed.returncode != 0:
-        return "error:automation_failed"
 
-    result = completed.stdout.strip()
-    if result not in _ALLOWED_APPLESCRIPT_RESULTS:
+def _redact_upstream_outcome(outcome: object) -> str:
+    """Translate upstream's human-readable result into this MCP's fixed tokens."""
+    if not isinstance(outcome, str):
         return "error:unexpected_result"
-    return result
 
+    match = _UPSTREAM_OUTCOME.match(outcome)
+    if match is not None:
+        state, service = match.groups()
+        result_state = "delivered" if state == "delivered" else "sent-unconfirmed"
+        return f"{result_state}:{_service_token(service)}"
 
-def build_send_script(recipient: str, message: str) -> str:
-    """Build the iMessage-first AppleScript with immediate SMS fallback."""
-    safe_recipient = escape_applescript(recipient)
-    safe_message = escape_applescript(message)
-    return f"""tell application "Messages"
-    try
-        set imessageService to first service whose service type = iMessage
-        send "{safe_message}" to participant "{safe_recipient}" of imessageService
-        return "accepted-unverified:iMessage"
-    on error
-        try
-            set smsService to first account whose service type = SMS and enabled is true
-            send "{safe_message}" to participant "{safe_recipient}" of smsService
-            return "accepted-unverified:SMS"
-        on error
-            return "error:send_failed"
-        end try
-    end try
-end tell"""
+    if outcome.startswith(
+        f"Message to {_UPSTREAM_DISPLAY_NAME} was handed to Messages.app via "
+    ):
+        service = "SMS" if " via SMS," in outcome else "iMessage"
+        return f"accepted-unverified:{service}"
+
+    if outcome.startswith("Error"):
+        return "error:send_failed"
+    if outcome.startswith("Unknown"):
+        return "error:unexpected_result"
+    return "error:unexpected_result"
 
 
 def send_message(
     recipient: str,
     message: str,
     *,
-    applescript_runner: Callable[[str], str] = run_applescript,
+    upstream_sender: Callable[[str, str, str, bool], str] = _send_message_direct,
 ) -> str:
-    """Submit one direct phone-number message without reading local user data."""
+    """Validate the send-only input, then invoke the cherry-picked upstream sender."""
     try:
         normalized_recipient = normalize_phone_number(recipient)
     except ValueError:
@@ -109,11 +81,10 @@ def send_message(
     if len(message) > MAX_MESSAGE_CHARS:
         return "rejected:message_too_long"
 
-    result = applescript_runner(build_send_script(normalized_recipient, message))
-    if result in _ALLOWED_APPLESCRIPT_RESULTS or result in {
-        "error:timeout",
-        "error:automation_failed",
-        "error:unexpected_result",
-    }:
-        return result
-    return "error:unexpected_result"
+    outcome = upstream_sender(
+        normalized_recipient,
+        message,
+        _UPSTREAM_DISPLAY_NAME,
+        False,
+    )
+    return _redact_upstream_outcome(outcome)

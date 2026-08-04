@@ -32,10 +32,10 @@ def classify_result(result: object) -> tuple[str, str | None]:
         for item in getattr(result, "content", [])
         if getattr(item, "type", "") == "text"
     ]
-    if texts == ["accepted-unverified:iMessage"]:
-        return "accepted-unverified", "iMessage"
-    if texts == ["accepted-unverified:SMS"]:
-        return "accepted-unverified", "SMS"
+    for result_class in ("delivered", "sent-unconfirmed", "accepted-unverified"):
+        for service in ("iMessage", "SMS"):
+            if texts == [f"{result_class}:{service}"]:
+                return result_class, service
     return "error", None
 
 
@@ -92,22 +92,23 @@ async def run(smoke_only: bool) -> int:
                     {"recipient": target, "message": body},
                 )
                 result_class, service = classify_result(result)
+                send_reached_messages = result_class in {
+                    "delivered",
+                    "sent-unconfirmed",
+                    "accepted-unverified",
+                }
                 emit(
                     "send_finished",
                     canary_id=canary_id,
                     result_class=result_class,
                     service=service,
-                    messages_mutated=(
-                        True if result_class == "accepted-unverified" else "unknown"
-                    ),
+                    messages_mutated=True if send_reached_messages else "unknown",
                 )
                 emit(
                     "stopped",
-                    messages_mutated=(
-                        True if result_class == "accepted-unverified" else "unknown"
-                    ),
+                    messages_mutated=True if send_reached_messages else "unknown",
                 )
-                return 0 if result_class == "accepted-unverified" else 1
+                return 0 if send_reached_messages else 1
     except Exception as exc:
         emit(
             "failed",

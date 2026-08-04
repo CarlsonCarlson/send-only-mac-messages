@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "send-only-mac-messages"
 version = "0.1.0"
-description = "A send-only MCP adapter for macOS Messages with SMS fallback"
+description = "A narrow macOS Messages sender with transient delivery observation"
 readme = {file = "README.md", content-type = "text/markdown"}
 license = "MIT"
 requires-python = ">=3.10"

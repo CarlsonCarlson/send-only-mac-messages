@@ -19,7 +19,15 @@ class Result:
     isError: bool = False
 
 
-def test_classifies_only_allow_listed_acceptance_tokens() -> None:
+def test_classifies_only_allow_listed_send_outcome_tokens() -> None:
+    assert classify_result(Result([Content("text", "delivered:iMessage")])) == (
+        "delivered",
+        "iMessage",
+    )
+    assert classify_result(Result([Content("text", "sent-unconfirmed:SMS")])) == (
+        "sent-unconfirmed",
+        "SMS",
+    )
     assert classify_result(
         Result([Content("text", "accepted-unverified:iMessage")])
     ) == ("accepted-unverified", "iMessage")

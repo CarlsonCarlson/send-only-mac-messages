@@ -1,6 +1,6 @@
 # ADR-0001: Reduce the tested fork to one outbound tool
 
-**Status:** Accepted
+**Status:** Accepted; delivery-observation clauses superseded by ADR-0003
 
 ## Context
 
