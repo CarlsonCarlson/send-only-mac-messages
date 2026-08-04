@@ -74,10 +74,10 @@ def test_tool_logs_and_result_do_not_echo_send_data(caplog) -> None:
 
     with patch(
         "send_only_mac_messages.server.send_message",
-        return_value="accepted-unverified:iMessage",
+        return_value="accepted-unverified:iMessage:message-not-correlated",
     ):
         result = tool_send_message(recipient, message)
 
-    assert result == "accepted-unverified:iMessage"
+    assert result == "accepted-unverified:iMessage:message-not-correlated"
     assert recipient not in caplog.text
     assert message not in caplog.text

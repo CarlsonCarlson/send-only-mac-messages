@@ -32,10 +32,9 @@ def classify_result(result: object) -> tuple[str, str | None]:
         for item in getattr(result, "content", [])
         if getattr(item, "type", "") == "text"
     ]
-    for result_class in ("delivered", "sent-unconfirmed", "accepted-unverified"):
-        for service in ("iMessage", "SMS"):
-            if texts == [f"{result_class}:{service}"]:
-                return result_class, service
+    for service in ("iMessage", "SMS"):
+        if texts == [f"delivered:{service}"]:
+            return "delivered", service
     for result_class, reasons in {
         "sent-unconfirmed": ("delivery-timeout",),
         "accepted-unverified": (

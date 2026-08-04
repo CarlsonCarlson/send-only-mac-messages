@@ -20,7 +20,8 @@ Keep the six-second, in-call transient send observation and its existing bounded
 query. After a correlated row reports `is_sent`, remember that row and continue
 polling every 500 milliseconds. Return immediately only when the row reports delivery
 or an asynchronous failure. When the window ends, return sent-unconfirmed only if a
-correlated sent row was observed.
+correlated sent row was observed. A candidate row that never reports sent, delivered,
+or failed remains unresolved and does not justify a sent-unconfirmed result.
 
 Preserve observer failure provenance using only fixed, redacted reason tokens:
 

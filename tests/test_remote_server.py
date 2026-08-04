@@ -153,7 +153,7 @@ def test_remote_tool_description_exposes_sms_fallback_contract() -> None:
 
 
 def test_authenticated_tool_call_attests_sender_and_returns_sender_label() -> None:
-    sender = Mock(return_value="accepted-unverified:iMessage")
+    sender = Mock(return_value="accepted-unverified:iMessage:message-not-correlated")
     attestor = SenderAttestor(
         logical_sender=LOGICAL_SENDER,
         expected_uid=501,
@@ -168,7 +168,7 @@ def test_authenticated_tool_call_attests_sender_and_returns_sender_label() -> No
     result = response.json()["result"]["structuredContent"]
     assert result == {
         "sender": LOGICAL_SENDER,
-        "result": "accepted-unverified:iMessage",
+        "result": "accepted-unverified:iMessage:message-not-correlated",
     }
     sender.assert_called_once_with("+14155551234", "private body")
     assert "+14155551234" not in response.text
@@ -176,7 +176,7 @@ def test_authenticated_tool_call_attests_sender_and_returns_sender_label() -> No
 
 
 def test_sender_attestation_failure_never_invokes_messages() -> None:
-    sender = Mock(return_value="accepted-unverified:iMessage")
+    sender = Mock(return_value="accepted-unverified:iMessage:message-not-correlated")
     attestor = SenderAttestor(
         logical_sender=LOGICAL_SENDER,
         expected_uid=501,

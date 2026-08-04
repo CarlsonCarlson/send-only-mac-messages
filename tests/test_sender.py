@@ -189,6 +189,34 @@ def test_send_reports_delivery_timeout_when_sent_never_becomes_delivered() -> No
     assert result == "sent-unconfirmed:iMessage:delivery-timeout"
 
 
+def test_send_does_not_claim_sent_when_correlated_row_remains_pending() -> None:
+    pending_row = {
+        "guid": "guid-1",
+        "send_error": 0,
+        "is_sent": 0,
+        "is_delivered": 0,
+        "service": "iMessage",
+        "text": "hello",
+        "attributedBody": None,
+    }
+    with (
+        patch(
+            "send_only_mac_messages.upstream_messages.run_applescript",
+            return_value="success:iMessage",
+        ),
+        patch(
+            "send_only_mac_messages.upstream_messages.query_messages_db",
+            return_value=[pending_row],
+        ),
+        patch("send_only_mac_messages.upstream_messages.time.sleep"),
+        patch("send_only_mac_messages.upstream_messages.time.time") as mock_time,
+    ):
+        mock_time.side_effect = [0.0, 0.0, 0.0, 7.0]
+        result = send_message("+14155551234", "hello")
+
+    assert result == "accepted-unverified:iMessage:message-not-correlated"
+
+
 def test_cherry_picked_direct_sms_helper_uses_sms_service() -> None:
     database_row = {
         "guid": "guid-1",
@@ -247,6 +275,20 @@ def test_upstream_human_results_are_mapped_to_fixed_redacted_tokens() -> None:
         sender.assert_called_once_with(
             "+14155551234", "private body", "recipient", False
         )
+
+
+def test_legacy_unreasoned_observation_result_is_rejected() -> None:
+    sender = Mock(
+        return_value=(
+            "Message to recipient was handed to Messages.app via iMessage, "
+            "but delivery could not be verified in the Messages database."
+        )
+    )
+
+    assert (
+        send_message("+14155551234", "private body", upstream_sender=sender)
+        == "error:unexpected_result"
+    )
 
 
 def test_exact_message_is_escaped_by_cherry_picked_helper() -> None:

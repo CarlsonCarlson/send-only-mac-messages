@@ -17,6 +17,7 @@ import os
 import sqlite3
 import subprocess
 import time
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -226,6 +227,10 @@ def _get_phone_formats(recipient: str) -> List[str]:
 APPLE_EPOCH_OFFSET = 978307200  # seconds between the unix epoch and 2001-01-01
 
 
+class _ObservationFailure(Enum):
+    DATABASE_UNAVAILABLE = "database-unavailable"
+
+
 def _candidate_handles(recipient: str) -> List[str]:
     """
     Build the set of handle ids the Messages database might have recorded
@@ -278,8 +283,8 @@ def _verify_send_in_db(
     re-encoded the text, or the row only has an attachment), we fall back to
     the plain latest-row behavior rather than reporting a false negative.
 
-    Returns the terminal or last correlated row. If no row resolves, returns a
-    fixed database-unavailable sentinel or None for message-not-correlated.
+    Returns the terminal row or last row observed as sent. If no sent row resolves,
+    returns a typed database-unavailable state or None for message-not-correlated.
     """
     apple_ns = int((sent_after_unix - APPLE_EPOCH_OFFSET - 1) * 1_000_000_000)
     database_unavailable = False
@@ -324,23 +329,24 @@ def _verify_send_in_db(
     variants = _candidate_handles(recipient)
     deadline = time.time() + timeout
     row = None
-    last_row = None
+    last_sent_row = None
     while time.time() < deadline:
         # Prefer the exact handle the send targeted; only widen to format
         # variants when the exact handle has no row (Messages sometimes
         # records the handle in a different format than it was given).
         row = _best_row(exact) or _best_row(variants)
         if row is not None:
-            last_row = row
             # A sent flag can precede the delivery flag, so keep polling until
             # delivery, failure, or the observation window ends.
             if row.get("send_error") or row.get("is_delivered"):
                 return row
+            if row.get("is_sent"):
+                last_sent_row = row
         time.sleep(0.5)
-    if last_row is not None:
-        return last_row
+    if last_sent_row is not None:
+        return last_sent_row
     if database_unavailable:
-        return {"observation_error": "database-unavailable"}
+        return _ObservationFailure.DATABASE_UNAVAILABLE
     return None
 
 
@@ -362,7 +368,7 @@ def _report_send_outcome(
             "but delivery could not be verified because no matching message row "
             "appeared during the observation window."
         )
-    if row.get("observation_error") == "database-unavailable":
+    if row is _ObservationFailure.DATABASE_UNAVAILABLE:
         return (
             f"Message to {display_name} was handed to Messages.app via {service}, "
             "but delivery could not be verified because the Messages database "
