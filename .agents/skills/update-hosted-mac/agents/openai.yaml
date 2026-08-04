@@ -1,0 +1,4 @@
+interface:
+  display_name: "Update Hosted Mac"
+  short_description: "Deploy this sender repo to the hosted Mac"
+  default_prompt: "Use $update-hosted-mac to deploy the current tracked sender version to the hosted Mac safely."
