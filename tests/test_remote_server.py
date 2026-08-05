@@ -152,6 +152,8 @@ def test_remote_tool_description_exposes_sms_fallback_contract() -> None:
     tools = response.json()["result"]["tools"]
     assert [tool["name"] for tool in tools] == ["tool_send_message"]
     assert "falls back once to SMS/RCS" in tools[0]["description"]
+    assert "synchronous AppleScript failure" in tools[0]["description"]
+    assert "exactly correlated" not in tools[0]["description"]
 
 
 def test_authenticated_tool_call_attests_sender_and_returns_sender_label() -> None:
@@ -271,8 +273,8 @@ def _build_app(
     settings = RemoteServerSettings(
         public_host=PUBLIC_HOST,
         logical_sender=LOGICAL_SENDER,
-        expected_user="test-user",
-        expected_uid=501,
+        expected_user=getpass.getuser(),
+        expected_uid=os.geteuid(),
         bearer_digest_path="/not-used",
     )
     verifier = BearerVerifier(

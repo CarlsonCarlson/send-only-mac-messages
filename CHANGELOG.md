@@ -16,7 +16,8 @@
   verbatim, without adding another MCP tool or retaining message state.
 - Require exact body and transport correlation, pin the resolved attempt row, and
   observe each transport for up to ten seconds at 500-millisecond intervals.
-- Fall back to SMS/RCS exactly once after an immediate or exactly correlated
-  definitive iMessage failure, with a fresh timestamp and observation window.
+- Fall back to SMS/RCS exactly once only after a synchronous iMessage AppleScript
+  failure, with a fresh timestamp and observation window. Database-observed failures
+  remain final to prevent duplicate transport submissions.
 - Replace `accepted-unverified` and `status-pending` with fixed
   `error:send_status_unknown` reason tokens.

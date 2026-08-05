@@ -7,7 +7,8 @@ Upstream provenance:
 Most marked function bodies began in ``mac_messages_mcp/messages.py`` at ``a6e4605``.
 The local transport adapter preserves this fork's stdin-only payload boundary and
 redacts subprocess errors. ADR-0005 replaces the heuristic observer result with an
-exact-attempt structured outcome and one bounded SMS/RCS continuation.
+exact-attempt structured outcome; ADR-0006 permits the bounded SMS/RCS continuation
+only after a synchronous AppleScript failure.
 """
 
 from __future__ import annotations
@@ -342,9 +343,9 @@ def _verify_send_in_db(
     The AppleScript `send` command returns without error even when the
     message later fails (e.g. error 22 for an unroutable handle, or a
     recipient who deregistered from iMessage), so the AppleScript result
-    alone cannot confirm a send. The authoritative outcome lives in
-    chat.db's message.error / message.is_sent columns, which are populated
-    within a second or two of the attempt.
+    alone cannot confirm a send. Status evidence appears in chat.db's
+    message.error / message.is_sent / message.is_delivered columns, whose
+    values can change asynchronously during the observation window.
 
     `sent_after_unix` alone is not a reliable correlation key: two sends to
     the same handle close together (e.g. rapid-fire tool calls) can both be
@@ -405,6 +406,7 @@ def _verify_send_in_db(
     pinned_row_id: Optional[int] = None
     pinned_row_seen = False
     last_sent_transport: Optional[MessageTransport] = None
+    last_failed_transport: Optional[MessageTransport] = None
     while time.time() < deadline:
         rows = _query_rows(variants, pinned_row_id)
         row = rows[0] if pinned_row_id is not None and rows else None
@@ -418,24 +420,27 @@ def _verify_send_in_db(
                 row.get("service"),
                 fallback=service,
             )
-            # A sent flag can precede the delivery flag, so keep polling until
-            # delivery, failure, or the observation window ends.
-            if row.get("send_error"):
-                return SendAttemptOutcome(
-                    state=AttemptState.FAILED,
-                    actual_transport=actual_transport,
-                    correlation_confidence=CorrelationConfidence.EXACT,
-                    fallback_permitted=actual_transport.public_service == "iMessage",
-                )
+            # Database flags can change asynchronously. Delivery is definitive,
+            # while an observed error is not safe evidence for another submission.
             if row.get("is_delivered"):
                 return SendAttemptOutcome(
                     state=AttemptState.DELIVERED,
                     actual_transport=actual_transport,
                     correlation_confidence=CorrelationConfidence.EXACT,
                 )
-            if row.get("is_sent"):
-                last_sent_transport = actual_transport
+            if row.get("send_error"):
+                last_failed_transport = actual_transport
+            else:
+                last_failed_transport = None
+                if row.get("is_sent"):
+                    last_sent_transport = actual_transport
         time.sleep(poll_interval)
+    if last_failed_transport is not None:
+        return SendAttemptOutcome(
+            state=AttemptState.FAILED,
+            actual_transport=last_failed_transport,
+            correlation_confidence=CorrelationConfidence.EXACT,
+        )
     if last_sent_transport is not None:
         return SendAttemptOutcome(
             state=AttemptState.SENT_UNCONFIRMED,

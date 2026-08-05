@@ -4,8 +4,8 @@ This deployment mirrors Heimdall's private remote-MCP authentication: one fixed
 bearer, only its SHA-256 digest on the hosted Mac, and stateless Streamable HTTP
 behind a dedicated Cloudflare hostname. It does not authorize a particular send.
 Delivery results come only from the narrow, transient observer described in ADR-0003.
-ADR-0005 constrains the one internal SMS/RCS fallback after an immediate or exactly
-correlated definitive iMessage failure. Neither result proves human receipt.
+ADR-0006 constrains the one internal SMS/RCS fallback to a synchronous iMessage
+AppleScript failure. Neither result proves human receipt.
 
 No command in this guide invokes Messages.app. A live canary remains a separate,
 explicitly approved action.

@@ -36,7 +36,7 @@ def tool_send_message(
         Field(description="Exact text body to send through Messages.app."),
     ],
 ) -> str:
-    """Tries iMessage first and falls back once to SMS/RCS after a definitive failure."""
+    """Tries iMessage first and falls back once to SMS/RCS after a synchronous AppleScript failure."""
     logger.info("Submitting one outbound Messages request")
     return send_message(recipient, message)
 
@@ -50,8 +50,8 @@ def create_mcp(
     """Create the one-tool MCP surface for either stdio or remote transport."""
     instructions = (
         "Send a message to an exact phone number through macOS Messages. "
-        "It tries iMessage first and falls back once to SMS/RCS only after an "
-        "immediate failure or an exactly correlated definitive failure. "
+        "It tries iMessage first and falls back once to SMS/RCS only after a "
+        "synchronous iMessage AppleScript failure. "
         "It can transiently observe only the correlated outgoing status for that "
         "send; it cannot read conversations, contacts, chats, or attachments."
     )

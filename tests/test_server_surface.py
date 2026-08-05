@@ -19,6 +19,8 @@ def test_mcp_exposes_exactly_one_send_tool() -> None:
     assert [tool.name for tool in tools] == ["tool_send_message"]
     assert tools[0].description is not None
     assert "falls back once to SMS/RCS" in tools[0].description
+    assert "synchronous AppleScript failure" in tools[0].description
+    assert "exactly correlated" not in tools[0].description
     assert set(tools[0].inputSchema["properties"]) == {"recipient", "message"}
     assert tools[0].annotations is not None
     assert tools[0].annotations.readOnlyHint is False
@@ -67,6 +69,9 @@ def test_manifest_declares_only_the_send_tool() -> None:
 
     assert [tool["name"] for tool in manifest["tools"]] == ["tool_send_message"]
     assert "falls back once to SMS/RCS" in manifest["tools"][0]["description"]
+    assert "synchronous iMessage AppleScript failure" in (
+        manifest["tools"][0]["description"]
+    )
 
 
 def test_tool_logs_and_result_do_not_echo_send_data(caplog) -> None:
@@ -146,7 +151,7 @@ def test_candidate_details_and_messages_error_code_are_redacted(caplog) -> None:
     ):
         result = tool_send_message(recipient, message)
 
-    assert result == "error:send_failed:SMS"
+    assert result == "error:send_failed:iMessage"
     combined_output = f"{result}\n{caplog.text}"
     for private_value in (
         recipient,

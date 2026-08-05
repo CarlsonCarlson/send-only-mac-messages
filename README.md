@@ -24,12 +24,12 @@ neither reads nor maintains a separate blocklist.
 ## Delivery behavior
 
 Each call tries iMessage first. It attempts the enabled SMS/RCS service exactly once
-if the iMessage AppleScript reports an immediate failure or the transient observer
-exactly correlates that iMessage attempt and reports a definitive failure. The SMS/RCS
-attempt gets its own start timestamp and observation window. It does not fall back
-after `sent-unconfirmed`, `error:send_status_unknown`, a timeout, an interruption, or
-a heuristic-only match because the iMessage outcome could still be successful and a
-retry could duplicate the message.
+only if the iMessage AppleScript reports a synchronous failure. The SMS/RCS attempt
+gets its own start timestamp and observation window. It does not fall back after a
+database-observed `error:send_failed`, `sent-unconfirmed`,
+`error:send_status_unknown`, a timeout, an interruption, or a heuristic-only match
+because the iMessage outcome could still be successful and a second submission could
+duplicate the message.
 
 SMS/RCS from a Mac depends on the paired iPhone and Messages configuration described by
 [Apple's Text Message Forwarding documentation](https://support.apple.com/en-us/102545).
@@ -67,8 +67,10 @@ absent when the ten-second window ended. The observer continues polling after
 message that could not be correlated, and an exact row whose send state remained
 unresolved.
 `error:send_failed:<service>` means that transport reported an immediate failure or
-the exact correlated row reported an asynchronous failure. A simultaneous send to
-the same recipient remains unknown unless the exact body can be decoded and matched.
+the exact correlated row continued to report an asynchronous failure through the
+observation window. A database-observed iMessage failure is final for the call and
+never starts SMS/RCS. A simultaneous send to the same recipient remains unknown
+unless the exact body can be decoded and matched.
 
 Clients should allow at least 40 seconds for one MCP invocation. The AppleScript
 process timeout remains 30 seconds, and a timeout or missing response is ambiguous:
@@ -134,7 +136,7 @@ effective and active-console user immediately before each send.
 Remote authentication does not authorize a particular message. Keep the tool on
 per-call approval, and never retry a tool-call timeout or missing response. The
 one internal SMS/RCS fallback is part of the same approved call and occurs only after
-an immediate or exactly correlated definitive iMessage failure.
+a synchronous iMessage AppleScript failure.
 See [the principal-bound remote setup guide](docs/remote-mcp-setup.md) and
 [ADR-0002](docs/adr/0002-principal-bound-remote-mcp.md).
 

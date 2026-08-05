@@ -222,7 +222,7 @@ def test_newest_recipient_row_is_not_authoritative_without_exact_body() -> None:
     assert outcome.fallback_permitted is False
 
 
-def test_exact_failure_returns_structured_fallback_permission() -> None:
+def test_exact_observed_failure_is_final_without_fallback_permission() -> None:
     row = {
         "row_id": 1,
         "guid": "guid-1",
@@ -233,25 +233,78 @@ def test_exact_failure_returns_structured_fallback_permission() -> None:
         "text": "hello",
         "attributedBody": None,
     }
+    fake_time = FakeTime()
     with (
         patch(
             "send_only_mac_messages.upstream_messages.query_messages_db",
             return_value=[row],
         ),
-        patch("send_only_mac_messages.upstream_messages.time.time", return_value=0.0),
+        patch(
+            "send_only_mac_messages.upstream_messages.time.time",
+            side_effect=fake_time.time,
+        ),
+        patch(
+            "send_only_mac_messages.upstream_messages.time.sleep",
+            side_effect=fake_time.sleep,
+        ),
     ):
         outcome = _verify_send_in_db(
             "+14155551234",
             0.0,
             message_text="hello",
             service=MessageTransport.IMESSAGE,
+            timeout=0.5,
         )
 
     assert outcome.state is AttemptState.FAILED
     assert outcome.actual_transport is MessageTransport.IMESSAGE
     assert outcome.correlation_confidence is CorrelationConfidence.EXACT
     assert outcome.reason is None
-    assert outcome.fallback_permitted is True
+    assert outcome.fallback_permitted is False
+
+
+def test_observed_error_can_resolve_to_delivery_without_fallback() -> None:
+    failed_row = {
+        "row_id": 1,
+        "guid": "guid-1",
+        "send_error": 22,
+        "is_sent": 0,
+        "is_delivered": 0,
+        "service": "iMessage",
+        "text": "hello",
+        "attributedBody": None,
+    }
+    delivered_row = {
+        **failed_row,
+        "is_delivered": 1,
+    }
+    fake_time = FakeTime()
+    with (
+        patch(
+            "send_only_mac_messages.upstream_messages.query_messages_db",
+            side_effect=[[failed_row], [delivered_row]],
+        ),
+        patch(
+            "send_only_mac_messages.upstream_messages.time.time",
+            side_effect=fake_time.time,
+        ),
+        patch(
+            "send_only_mac_messages.upstream_messages.time.sleep",
+            side_effect=fake_time.sleep,
+        ),
+    ):
+        outcome = _verify_send_in_db(
+            "+14155551234",
+            0.0,
+            message_text="hello",
+            service=MessageTransport.IMESSAGE,
+            timeout=1.0,
+        )
+
+    assert outcome.state is AttemptState.DELIVERED
+    assert outcome.actual_transport is MessageTransport.IMESSAGE
+    assert outcome.correlation_confidence is CorrelationConfidence.EXACT
+    assert outcome.fallback_permitted is False
 
 
 def test_sms_observer_cannot_resolve_failed_imessage_row(messages_db: Path) -> None:

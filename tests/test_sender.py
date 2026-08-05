@@ -68,7 +68,7 @@ def test_rejects_empty_and_oversized_messages_without_invoking_upstream() -> Non
     sender.assert_not_called()
 
 
-def test_exact_imessage_failure_falls_back_to_sms_exactly_once() -> None:
+def test_exact_observed_imessage_failure_does_not_submit_sms() -> None:
     imessage_sender = Mock(
         return_value=SendAttemptOutcome(
             state=AttemptState.FAILED,
@@ -77,13 +77,7 @@ def test_exact_imessage_failure_falls_back_to_sms_exactly_once() -> None:
             fallback_permitted=True,
         )
     )
-    sms_sender = Mock(
-        return_value=SendAttemptOutcome(
-            state=AttemptState.DELIVERED,
-            actual_transport=MessageTransport.RCS,
-            correlation_confidence=CorrelationConfidence.EXACT,
-        )
-    )
+    sms_sender = Mock()
 
     result = send_message(
         "+14155551234",
@@ -92,9 +86,9 @@ def test_exact_imessage_failure_falls_back_to_sms_exactly_once() -> None:
         sms_sender=sms_sender,
     )
 
-    assert result == "delivered:SMS"
     imessage_sender.assert_called_once_with("+14155551234", "hello")
-    sms_sender.assert_called_once_with("+14155551234", "hello")
+    sms_sender.assert_not_called()
+    assert result == "error:send_failed:iMessage"
 
 
 def test_immediate_imessage_error_starts_a_fresh_sms_attempt() -> None:
@@ -134,39 +128,34 @@ def test_immediate_imessage_error_starts_a_fresh_sms_attempt() -> None:
     )
 
 
-def test_observed_imessage_failure_gives_sms_an_independent_window() -> None:
+def test_observed_imessage_failure_does_not_start_an_sms_window() -> None:
     imessage_failed = SendAttemptOutcome(
         state=AttemptState.FAILED,
         actual_transport=MessageTransport.IMESSAGE,
         correlation_confidence=CorrelationConfidence.EXACT,
         fallback_permitted=True,
     )
-    sms_delivered = SendAttemptOutcome(
-        state=AttemptState.DELIVERED,
-        actual_transport=MessageTransport.RCS,
-        correlation_confidence=CorrelationConfidence.EXACT,
-    )
     with (
         patch(
             "send_only_mac_messages.upstream_messages.run_applescript",
-            side_effect=["success", "success"],
-        ),
+            return_value="success",
+        ) as runner,
         patch(
             "send_only_mac_messages.upstream_messages._verify_send_in_db",
-            side_effect=[imessage_failed, sms_delivered],
+            return_value=imessage_failed,
         ) as observer,
-        patch(
-            "send_only_mac_messages.upstream_messages.time.time",
-            side_effect=[100.0, 200.0],
-        ),
+        patch("send_only_mac_messages.upstream_messages.time.time", return_value=100.0),
     ):
         result = send_message("+14155551234", "hello")
 
-    assert result == "delivered:SMS"
-    assert observer.call_args_list[0].args == ("+14155551234", 100.0, "hello")
-    assert observer.call_args_list[0].kwargs == {"service": MessageTransport.IMESSAGE}
-    assert observer.call_args_list[1].args == ("+14155551234", 200.0, "hello")
-    assert observer.call_args_list[1].kwargs == {"service": MessageTransport.SMS}
+    assert result == "error:send_failed:iMessage"
+    runner.assert_called_once()
+    observer.assert_called_once_with(
+        "+14155551234",
+        100.0,
+        "hello",
+        service=MessageTransport.IMESSAGE,
+    )
 
 
 @pytest.mark.parametrize(
@@ -221,7 +210,7 @@ def test_all_unknown_reasons_are_fixed_for_both_public_services(
         imessage_outcome = SendAttemptOutcome(
             state=AttemptState.FAILED,
             actual_transport=MessageTransport.IMESSAGE,
-            correlation_confidence=CorrelationConfidence.EXACT,
+            correlation_confidence=CorrelationConfidence.NONE,
             fallback_permitted=True,
         )
     sms_sender = Mock(return_value=unknown)
@@ -286,7 +275,7 @@ def test_sms_fallback_returns_its_final_outcome_without_a_loop(
     imessage_failed = SendAttemptOutcome(
         state=AttemptState.FAILED,
         actual_transport=MessageTransport.IMESSAGE,
-        correlation_confidence=CorrelationConfidence.EXACT,
+        correlation_confidence=CorrelationConfidence.NONE,
         fallback_permitted=True,
     )
     sms_sender = Mock(return_value=sms_outcome)

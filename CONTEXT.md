@@ -55,9 +55,9 @@ _Avoid_: Heimdall-authorized sender, Heimdall send clearance
 
 **Messages delivery service**:
 The Apple Messages transport selected for an outbound phone number. The adapter tries
-iMessage first and attempts SMS/RCS exactly once after an immediate iMessage error or
-an exactly correlated definitive iMessage failure. Unknown, timed-out, interrupted,
-or heuristic-only outcomes never authorize fallback or retry.
+iMessage first and attempts SMS/RCS exactly once only when the iMessage AppleScript
+reports a synchronous failure. Database-observed failures, unknown, timed-out,
+interrupted, or heuristic-only outcomes never authorize fallback or retry.
 _Avoid_: iMessage-only sender
 
 **Send-status unknown**:

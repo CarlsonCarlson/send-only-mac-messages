@@ -7,6 +7,7 @@ from collections.abc import Callable
 
 from send_only_mac_messages.upstream_messages import (
     AttemptState,
+    CorrelationConfidence,
     ObservationReason,
     SendAttemptOutcome,
     _send_message_direct,
@@ -87,6 +88,7 @@ def send_message(
         isinstance(outcome, SendAttemptOutcome)
         and outcome.state is AttemptState.FAILED
         and outcome.actual_transport.public_service == "iMessage"
+        and outcome.correlation_confidence is CorrelationConfidence.NONE
         and outcome.fallback_permitted
     ):
         outcome = sms_sender(normalized_recipient, message)
