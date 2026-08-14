@@ -53,12 +53,15 @@ The outbound path from Nimbus to the send-only Messages adapter. It does not cal
 Heimdall, and Heimdall does not depend on or connect to the adapter.
 _Avoid_: Heimdall-authorized sender, Heimdall send clearance
 
-**Messages delivery service**:
-The Apple Messages transport selected for an outbound phone number. The adapter tries
-iMessage first and attempts SMS/RCS exactly once only when the iMessage AppleScript
-reports a synchronous failure. Database-observed failures, unknown, timed-out,
-interrupted, or heuristic-only outcomes never authorize fallback or retry.
-_Avoid_: iMessage-only sender
+**Messages delivery mode**:
+The required per-call policy selected by the caller. `imessage_only` submits through
+iMessage and never invokes SMS/RCS. `imessage_with_sms_fallback` submits through
+iMessage first and may submit SMS/RCS exactly once after either a synchronous
+AppleScript failure or an exactly correlated database-observed failure. The latter
+explicitly accepts the known risk that a delayed iMessage and the fallback can both
+arrive. Unknown, timed-out, interrupted, missing, or non-correlated outcomes never
+authorize fallback or retry. Omitted or invalid modes fail before Messages.app.
+_Avoid_: Automatic transport selection, implicit SMS permission
 
 **Send-status unknown**:
 A fixed error result meaning Messages.app accepted the AppleScript command, but the

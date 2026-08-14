@@ -1,6 +1,6 @@
 # ADR-0006: Permit SMS fallback only after a synchronous iMessage failure
 
-**Status:** Accepted
+**Status:** Superseded in part by ADR-0007
 
 ## Context
 

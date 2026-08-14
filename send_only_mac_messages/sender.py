@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from typing import Literal, TypeAlias
 
 from send_only_mac_messages.upstream_messages import (
     AttemptState,
@@ -17,6 +18,14 @@ from send_only_mac_messages.upstream_messages import (
 )
 
 MAX_MESSAGE_CHARS = 4_000
+
+DeliveryMode: TypeAlias = Literal[
+    "imessage_only",
+    "imessage_with_sms_fallback",
+]
+IMESSAGE_ONLY: DeliveryMode = "imessage_only"
+IMESSAGE_WITH_SMS_FALLBACK: DeliveryMode = "imessage_with_sms_fallback"
+DELIVERY_MODES = frozenset({IMESSAGE_ONLY, IMESSAGE_WITH_SMS_FALLBACK})
 
 _PHONE_INPUT = re.compile(r"\+?[0-9 ()-]+\Z")
 
@@ -68,11 +77,15 @@ def _public_result(outcome: object) -> str:
 def send_message(
     recipient: str,
     message: str,
+    delivery_mode: DeliveryMode = IMESSAGE_ONLY,
     *,
     upstream_sender: Callable[[str, str], object] = _send_message_direct,
     sms_sender: Callable[[str, str], object] = _send_message_sms,
 ) -> str:
-    """Validate input and execute one iMessage-first, at-most-one-SMS send call."""
+    """Validate input and execute the requested one-call delivery policy."""
+    if delivery_mode not in DELIVERY_MODES:
+        return "rejected:invalid_delivery_mode"
+
     try:
         normalized_recipient = normalize_phone_number(recipient)
     except ValueError:
@@ -85,11 +98,17 @@ def send_message(
 
     outcome = upstream_sender(normalized_recipient, message)
     if (
-        isinstance(outcome, SendAttemptOutcome)
+        delivery_mode == IMESSAGE_WITH_SMS_FALLBACK
+        and isinstance(outcome, SendAttemptOutcome)
         and outcome.state is AttemptState.FAILED
         and outcome.actual_transport.public_service == "iMessage"
-        and outcome.correlation_confidence is CorrelationConfidence.NONE
-        and outcome.fallback_permitted
+        and (
+            outcome.correlation_confidence is CorrelationConfidence.EXACT
+            or (
+                outcome.correlation_confidence is CorrelationConfidence.NONE
+                and outcome.fallback_permitted
+            )
+        )
     ):
         outcome = sms_sender(normalized_recipient, message)
     return _public_result(outcome)

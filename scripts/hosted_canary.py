@@ -16,6 +16,7 @@ from mcp.client.stdio import stdio_client
 
 EXPECTED_TOOLS = {"tool_send_message"}
 CANARY_PREFIX = "Send-only Mac Messages hosted canary"
+DELIVERY_MODES = ("imessage_only", "imessage_with_sms_fallback")
 
 
 def emit(phase: str, **fields: Any) -> None:
@@ -69,7 +70,7 @@ def read_approved_target() -> str:
     return target
 
 
-async def run(smoke_only: bool) -> int:
+async def run(smoke_only: bool, delivery_mode: str) -> int:
     """Verify the surface and optionally perform exactly one send invocation."""
     send_invoked = False
     target = None if smoke_only else read_approved_target()
@@ -111,7 +112,11 @@ async def run(smoke_only: bool) -> int:
                 send_invoked = True
                 result = await session.call_tool(
                     "tool_send_message",
-                    {"recipient": target, "message": body},
+                    {
+                        "recipient": target,
+                        "message": body,
+                        "delivery_mode": delivery_mode,
+                    },
                 )
                 result_class, service = classify_result(result)
                 messages_mutated = mutation_evidence(result_class)
@@ -143,8 +148,14 @@ def main() -> int:
         action="store_true",
         help="initialize and verify the MCP surface without invoking the send tool",
     )
+    parser.add_argument(
+        "--delivery-mode",
+        choices=DELIVERY_MODES,
+        default="imessage_only",
+        help="delivery policy for an explicitly authorized live invocation",
+    )
     args = parser.parse_args()
-    return asyncio.run(run(args.smoke_only))
+    return asyncio.run(run(args.smoke_only, args.delivery_mode))
 
 
 if __name__ == "__main__":

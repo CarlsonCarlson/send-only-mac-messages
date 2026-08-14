@@ -18,10 +18,23 @@ def test_mcp_exposes_exactly_one_send_tool() -> None:
 
     assert [tool.name for tool in tools] == ["tool_send_message"]
     assert tools[0].description is not None
-    assert "falls back once to SMS/RCS" in tools[0].description
-    assert "synchronous AppleScript failure" in tools[0].description
-    assert "exactly correlated" not in tools[0].description
-    assert set(tools[0].inputSchema["properties"]) == {"recipient", "message"}
+    assert "explicitly selected iMessage-only or fallback policy" in (
+        tools[0].description
+    )
+    assert set(tools[0].inputSchema["properties"]) == {
+        "recipient",
+        "message",
+        "delivery_mode",
+    }
+    assert set(tools[0].inputSchema["required"]) == {
+        "recipient",
+        "message",
+        "delivery_mode",
+    }
+    assert tools[0].inputSchema["properties"]["delivery_mode"]["enum"] == [
+        "imessage_only",
+        "imessage_with_sms_fallback",
+    ]
     assert tools[0].annotations is not None
     assert tools[0].annotations.readOnlyHint is False
     assert tools[0].annotations.destructiveHint is True
@@ -68,8 +81,8 @@ def test_manifest_declares_only_the_send_tool() -> None:
     manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
 
     assert [tool["name"] for tool in manifest["tools"]] == ["tool_send_message"]
-    assert "falls back once to SMS/RCS" in manifest["tools"][0]["description"]
-    assert "synchronous iMessage AppleScript failure" in (
+    assert "required explicit delivery mode" in (manifest["tools"][0]["description"])
+    assert "iMessage-only never attempts SMS/RCS" in (
         manifest["tools"][0]["description"]
     )
 
@@ -81,10 +94,11 @@ def test_tool_logs_and_result_do_not_echo_send_data(caplog) -> None:
     with patch(
         "send_only_mac_messages.server.send_message",
         return_value="error:send_status_unknown:iMessage:message-not-correlated",
-    ):
-        result = tool_send_message(recipient, message)
+    ) as sender:
+        result = tool_send_message(recipient, message, "imessage_only")
 
     assert result == "error:send_status_unknown:iMessage:message-not-correlated"
+    sender.assert_called_once_with(recipient, message, "imessage_only")
     assert recipient not in caplog.text
     assert message not in caplog.text
 
@@ -109,7 +123,11 @@ def test_database_error_details_are_redacted_from_mcp_result_and_logs(caplog) ->
             side_effect=[0.0, 0.0, 0.0, 11.0],
         ),
     ):
-        result = tool_send_message(recipient, message)
+        result = tool_send_message(
+            recipient,
+            message,
+            "imessage_with_sms_fallback",
+        )
 
     assert result == "error:send_status_unknown:iMessage:database-unavailable"
     assert private_database_error not in result
@@ -149,7 +167,7 @@ def test_candidate_details_and_messages_error_code_are_redacted(caplog) -> None:
             side_effect=[100.0, 100.0, 100.0, 200.0],
         ),
     ):
-        result = tool_send_message(recipient, message)
+        result = tool_send_message(recipient, message, "imessage_only")
 
     assert result == "error:send_failed:iMessage"
     combined_output = f"{result}\n{caplog.text}"

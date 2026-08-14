@@ -6,7 +6,14 @@ message that tool just submitted.
 
 ## Boundary
 
-`tool_send_message(recipient, message)` accepts an exact phone number and text body.
+`tool_send_message(recipient, message, delivery_mode)` accepts an exact phone number,
+text body, and required delivery policy. `delivery_mode` is exactly one of:
+
+- `imessage_only`: submit iMessage only and never invoke SMS/RCS.
+- `imessage_with_sms_fallback`: submit iMessage first, then submit SMS/RCS once if
+  AppleScript rejects iMessage immediately or the exact correlated iMessage row
+  remains failed through observation.
+
 Ten-digit US numbers are normalized with `+1`; international numbers may be passed in
 E.164 form. Contact names, email addresses, contact selections, group identifiers,
 and recipient discovery are rejected.
@@ -23,13 +30,19 @@ neither reads nor maintains a separate blocklist.
 
 ## Delivery behavior
 
-Each call tries iMessage first. It attempts the enabled SMS/RCS service exactly once
-only if the iMessage AppleScript reports a synchronous failure. The SMS/RCS attempt
-gets its own start timestamp and observation window. It does not fall back after a
-database-observed `error:send_failed`, `sent-unconfirmed`,
-`error:send_status_unknown`, a timeout, an interruption, or a heuristic-only match
-because the iMessage outcome could still be successful and a second submission could
-duplicate the message.
+Each call uses its required `delivery_mode`. `imessage_only` never calls the SMS/RCS
+transport, including after a synchronous or database-observed iMessage failure.
+`imessage_with_sms_fallback` attempts the enabled SMS/RCS service exactly once after
+either a synchronous iMessage AppleScript failure or an exactly correlated,
+database-observed `error:send_failed:iMessage`. The SMS/RCS attempt gets its own start
+timestamp and observation window.
+
+Fallback after a database-observed failure deliberately accepts duplicate-delivery
+risk: a row can report an asynchronous error before the recipient later receives the
+iMessage. Unknown status, sent-unconfirmed, timeout, interruption, missing response,
+or a non-correlated outcome never authorizes fallback in either mode. Use
+`imessage_only` when duplicate-free transport isolation matters more than reaching an
+SMS/RCS destination.
 
 SMS/RCS from a Mac depends on the paired iPhone and Messages configuration described by
 [Apple's Text Message Forwarding documentation](https://support.apple.com/en-us/102545).
@@ -68,9 +81,10 @@ message that could not be correlated, and an exact row whose send state remained
 unresolved.
 `error:send_failed:<service>` means that transport reported an immediate failure or
 the exact correlated row continued to report an asynchronous failure through the
-observation window. A database-observed iMessage failure is final for the call and
-never starts SMS/RCS. A simultaneous send to the same recipient remains unknown
-unless the exact body can be decoded and matched.
+observation window. An iMessage failure starts SMS/RCS only when the caller explicitly
+selected `imessage_with_sms_fallback` and the failure was immediate or exactly
+correlated. A simultaneous send to the same recipient remains unknown unless the
+exact body can be decoded and matched.
 
 Clients should allow at least 40 seconds for one MCP invocation. The AppleScript
 process timeout remains 30 seconds, and a timeout or missing response is ambiguous:
@@ -134,9 +148,9 @@ digest on the Mac. It also requires an expected logical sender label and recheck
 effective and active-console user immediately before each send.
 
 Remote authentication does not authorize a particular message. Keep the tool on
-per-call approval, and never retry a tool-call timeout or missing response. The
-one internal SMS/RCS fallback is part of the same approved call and occurs only after
-a synchronous iMessage AppleScript failure.
+per-call approval, require the delivery mode on every call, and never retry a
+tool-call timeout or missing response. An internal SMS/RCS attempt is part of the
+same approved call only when `imessage_with_sms_fallback` was explicitly selected.
 See [the principal-bound remote setup guide](docs/remote-mcp-setup.md) and
 [ADR-0002](docs/adr/0002-principal-bound-remote-mcp.md).
 
@@ -167,6 +181,9 @@ interrupted post-invocation result is never retried automatically. Unknown-statu
 tokens prove that a submission reached Messages.app. A definitive-failure token may
 instead represent an immediate failure, so mutation remains unknown. The harness
 returns failure unless the final result is delivered or sent-unconfirmed.
+Live harness sends default to `imessage_only`; selecting
+`--delivery-mode imessage_with_sms_fallback` explicitly authorizes the one possible
+SMS/RCS continuation.
 
 ## Origin
 

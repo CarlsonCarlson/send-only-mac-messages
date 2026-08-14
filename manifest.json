@@ -2,9 +2,9 @@
   "manifest_version": "0.3",
   "name": "send-only-mac-messages",
   "display_name": "Send-only Mac Messages",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Send direct macOS Messages and transiently verify their delivery status.",
-  "long_description": "A narrow local MCP server with one outbound tool. It accepts an exact phone number and message body, tries iMessage first, falls back once to SMS/RCS only after a synchronous iMessage AppleScript failure, and transiently observes only those outgoing statuses. It has no conversation, Contacts, chat, attachment, or later status lookup tools.",
+  "long_description": "A narrow local MCP server with one outbound tool. It accepts an exact phone number, message body, and required delivery mode. iMessage-only never attempts SMS/RCS; the explicit fallback mode may try SMS/RCS once after an immediate or exactly correlated iMessage failure. It transiently observes only those outgoing statuses and has no conversation, Contacts, chat, attachment, or later status lookup tools.",
   "author": {
     "name": "Carlson Cheng"
   },
@@ -39,7 +39,7 @@
   "tools": [
     {
       "name": "tool_send_message",
-      "description": "Sends one direct message to an exact phone number through Messages.app, then transiently checks its send status. It tries iMessage first and falls back once to SMS/RCS only after a synchronous iMessage AppleScript failure. Returns a fixed status without echoing recipient or message content."
+      "description": "Sends one direct message to an exact phone number through Messages.app using a required explicit delivery mode, then transiently checks its send status. iMessage-only never attempts SMS/RCS. The fallback mode may attempt SMS/RCS once after an immediate or exactly correlated iMessage failure and can duplicate a delayed iMessage. Returns a fixed status without echoing recipient or message content."
     }
   ],
   "compatibility": {

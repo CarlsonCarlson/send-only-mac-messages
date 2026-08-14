@@ -8,6 +8,8 @@ from unittest.mock import Mock, patch
 import pytest
 
 from send_only_mac_messages.sender import (
+    IMESSAGE_ONLY,
+    IMESSAGE_WITH_SMS_FALLBACK,
     MAX_MESSAGE_CHARS,
     escape_applescript,
     normalize_phone_number,
@@ -68,7 +70,21 @@ def test_rejects_empty_and_oversized_messages_without_invoking_upstream() -> Non
     sender.assert_not_called()
 
 
-def test_exact_observed_imessage_failure_does_not_submit_sms() -> None:
+def test_rejects_invalid_delivery_mode_without_invoking_upstream() -> None:
+    sender = Mock()
+
+    result = send_message(  # type: ignore[arg-type]
+        "+14155551234",
+        "hello",
+        "automatic",
+        upstream_sender=sender,
+    )
+
+    assert result == "rejected:invalid_delivery_mode"
+    sender.assert_not_called()
+
+
+def test_imessage_only_exact_observed_failure_does_not_submit_sms() -> None:
     imessage_sender = Mock(
         return_value=SendAttemptOutcome(
             state=AttemptState.FAILED,
@@ -91,6 +107,35 @@ def test_exact_observed_imessage_failure_does_not_submit_sms() -> None:
     assert result == "error:send_failed:iMessage"
 
 
+def test_fallback_mode_exact_observed_failure_submits_sms_once() -> None:
+    imessage_sender = Mock(
+        return_value=SendAttemptOutcome(
+            state=AttemptState.FAILED,
+            actual_transport=MessageTransport.IMESSAGE,
+            correlation_confidence=CorrelationConfidence.EXACT,
+        )
+    )
+    sms_sender = Mock(
+        return_value=SendAttemptOutcome(
+            state=AttemptState.DELIVERED,
+            actual_transport=MessageTransport.RCS,
+            correlation_confidence=CorrelationConfidence.EXACT,
+        )
+    )
+
+    result = send_message(
+        "+14155551234",
+        "hello",
+        IMESSAGE_WITH_SMS_FALLBACK,
+        upstream_sender=imessage_sender,
+        sms_sender=sms_sender,
+    )
+
+    imessage_sender.assert_called_once_with("+14155551234", "hello")
+    sms_sender.assert_called_once_with("+14155551234", "hello")
+    assert result == "delivered:SMS"
+
+
 def test_immediate_imessage_error_starts_a_fresh_sms_attempt() -> None:
     sms_delivered = SendAttemptOutcome(
         state=AttemptState.DELIVERED,
@@ -111,7 +156,11 @@ def test_immediate_imessage_error_starts_a_fresh_sms_attempt() -> None:
             side_effect=[100.0, 200.0],
         ),
     ):
-        result = send_message("+14155551234", "hello")
+        result = send_message(
+            "+14155551234",
+            "hello",
+            IMESSAGE_WITH_SMS_FALLBACK,
+        )
 
     assert result == "delivered:SMS"
     assert runner.call_count == 2
@@ -128,7 +177,7 @@ def test_immediate_imessage_error_starts_a_fresh_sms_attempt() -> None:
     )
 
 
-def test_observed_imessage_failure_does_not_start_an_sms_window() -> None:
+def test_imessage_only_observed_failure_does_not_start_an_sms_window() -> None:
     imessage_failed = SendAttemptOutcome(
         state=AttemptState.FAILED,
         actual_transport=MessageTransport.IMESSAGE,
@@ -156,6 +205,30 @@ def test_observed_imessage_failure_does_not_start_an_sms_window() -> None:
         "hello",
         service=MessageTransport.IMESSAGE,
     )
+
+
+def test_imessage_only_immediate_failure_does_not_submit_sms() -> None:
+    imessage_sender = Mock(
+        return_value=SendAttemptOutcome(
+            state=AttemptState.FAILED,
+            actual_transport=MessageTransport.IMESSAGE,
+            correlation_confidence=CorrelationConfidence.NONE,
+            fallback_permitted=True,
+        )
+    )
+    sms_sender = Mock()
+
+    result = send_message(
+        "+14155551234",
+        "hello",
+        IMESSAGE_ONLY,
+        upstream_sender=imessage_sender,
+        sms_sender=sms_sender,
+    )
+
+    assert result == "error:send_failed:iMessage"
+    imessage_sender.assert_called_once_with("+14155551234", "hello")
+    sms_sender.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -218,6 +291,7 @@ def test_all_unknown_reasons_are_fixed_for_both_public_services(
     result = send_message(
         "+14155551234",
         "hello",
+        IMESSAGE_WITH_SMS_FALLBACK,
         upstream_sender=Mock(return_value=imessage_outcome),
         sms_sender=sms_sender,
     )
@@ -283,6 +357,7 @@ def test_sms_fallback_returns_its_final_outcome_without_a_loop(
     result = send_message(
         "+14155551234",
         "hello",
+        IMESSAGE_WITH_SMS_FALLBACK,
         upstream_sender=Mock(return_value=imessage_failed),
         sms_sender=sms_sender,
     )
@@ -303,6 +378,7 @@ def test_applescript_timeout_never_triggers_sms_fallback() -> None:
         result = send_message(
             "+14155551234",
             "hello",
+            IMESSAGE_WITH_SMS_FALLBACK,
             sms_sender=sms_sender,
         )
 
@@ -316,6 +392,7 @@ def test_missing_sender_result_never_triggers_sms_fallback() -> None:
     result = send_message(
         "+14155551234",
         "hello",
+        IMESSAGE_WITH_SMS_FALLBACK,
         upstream_sender=Mock(return_value=None),
         sms_sender=sms_sender,
     )
@@ -331,6 +408,7 @@ def test_tool_interruption_propagates_without_sms_fallback() -> None:
         send_message(
             "+14155551234",
             "hello",
+            IMESSAGE_WITH_SMS_FALLBACK,
             upstream_sender=Mock(side_effect=KeyboardInterrupt),
             sms_sender=sms_sender,
         )

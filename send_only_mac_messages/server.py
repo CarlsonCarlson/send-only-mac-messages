@@ -11,7 +11,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from send_only_mac_messages.sender import send_message
+from send_only_mac_messages.sender import DeliveryMode, send_message
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,14 +35,24 @@ def tool_send_message(
         str,
         Field(description="Exact text body to send through Messages.app."),
     ],
+    delivery_mode: Annotated[
+        DeliveryMode,
+        Field(
+            description=(
+                "Required delivery policy. imessage_only never attempts SMS/RCS. "
+                "imessage_with_sms_fallback permits one SMS/RCS attempt after an "
+                "immediate or exactly correlated iMessage failure."
+            )
+        ),
+    ],
 ) -> str:
-    """Tries iMessage first and falls back once to SMS/RCS after a synchronous AppleScript failure."""
+    """Sends with the explicitly selected iMessage-only or fallback policy."""
     logger.info("Submitting one outbound Messages request")
-    return send_message(recipient, message)
+    return send_message(recipient, message, delivery_mode)
 
 
 def create_mcp(
-    tool_handler: Callable[[str, str], object] = tool_send_message,
+    tool_handler: Callable[[str, str, DeliveryMode], object] = tool_send_message,
     *,
     structured_output: bool | None = None,
     remote_instructions: str | None = None,
@@ -50,8 +60,10 @@ def create_mcp(
     """Create the one-tool MCP surface for either stdio or remote transport."""
     instructions = (
         "Send a message to an exact phone number through macOS Messages. "
-        "It tries iMessage first and falls back once to SMS/RCS only after a "
-        "synchronous iMessage AppleScript failure. "
+        "Every call must select imessage_only or imessage_with_sms_fallback. "
+        "imessage_only never attempts SMS/RCS. The fallback mode may attempt "
+        "SMS/RCS once after an immediate or exactly correlated iMessage failure; "
+        "fallback after an observed failure can duplicate a delayed iMessage. "
         "It can transiently observe only the correlated outgoing status for that "
         "send; it cannot read conversations, contacts, chats, or attachments."
     )
