@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "send-only-mac-messages",
   "display_name": "Send-only Mac Messages",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Send direct macOS Messages and transiently verify their delivery status.",
   "long_description": "A narrow local MCP server with one outbound tool. It accepts an exact phone number, message body, and required delivery mode. iMessage-only never attempts SMS/RCS; the explicit fallback mode may try SMS/RCS once after an immediate or exactly correlated iMessage failure. It transiently observes only those outgoing statuses and has no conversation, Contacts, chat, attachment, or later status lookup tools.",
   "author": {
