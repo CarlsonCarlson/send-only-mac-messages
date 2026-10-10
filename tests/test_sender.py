@@ -22,8 +22,11 @@ from send_only_mac_messages.upstream_messages import (
     MessageTransport,
     ObservationReason,
     SendAttemptOutcome,
+    _send_message_group_chat,
     _send_message_sms,
 )
+
+GROUP_CHAT_ID = "any;+;chat123456789012345678"
 
 
 @pytest.mark.parametrize(
@@ -41,15 +44,146 @@ def test_normalizes_raw_phone_numbers(raw: str, normalized: str) -> None:
 
 @pytest.mark.parametrize(
     "recipient",
-    ["Carlson Cheng", "carlson@example.com", "contact:1", "12345", "+1234567890123456"],
+    [
+        "Carlson Cheng",
+        "carlson@example.com",
+        "contact:1",
+        "12345",
+        "+1234567890123456",
+        "chat123456789012345678",
+        "any;-;+14155551234",
+        "any;+;chat",
+        "group:Buyers",
+    ],
 )
-def test_rejects_every_recipient_form_except_phone_numbers(recipient: str) -> None:
+def test_rejects_every_recipient_form_except_phone_numbers_and_chat_ids(
+    recipient: str,
+) -> None:
     sender = Mock()
+    group_sender = Mock()
     assert (
-        send_message(recipient, "hello", upstream_sender=sender)
+        send_message(
+            recipient, "hello", upstream_sender=sender, group_sender=group_sender
+        )
         == "rejected:invalid_recipient"
     )
     sender.assert_not_called()
+    group_sender.assert_not_called()
+
+
+@pytest.mark.parametrize("chat_id", [GROUP_CHAT_ID, "iMessage;+;chat12345"])
+def test_chat_id_recipient_routes_to_the_group_sender(chat_id: str) -> None:
+    sender = Mock()
+    group_sender = Mock(
+        return_value=SendAttemptOutcome(
+            state=AttemptState.SENT_UNCONFIRMED,
+            actual_transport=MessageTransport.IMESSAGE,
+            correlation_confidence=CorrelationConfidence.EXACT,
+            reason=ObservationReason.GROUP_DELIVERY_NOT_REPORTED,
+        )
+    )
+
+    result = send_message(
+        f"  {chat_id} ",
+        "hello",
+        IMESSAGE_ONLY,
+        upstream_sender=sender,
+        group_sender=group_sender,
+    )
+
+    assert result == "sent:iMessage:group-delivery-not-reported"
+    group_sender.assert_called_once_with(chat_id, "hello")
+    sender.assert_not_called()
+
+
+def test_chat_id_recipient_rejects_sms_fallback_mode_before_messages() -> None:
+    sender = Mock()
+    group_sender = Mock()
+
+    result = send_message(
+        GROUP_CHAT_ID,
+        "hello",
+        IMESSAGE_WITH_SMS_FALLBACK,
+        upstream_sender=sender,
+        group_sender=group_sender,
+    )
+
+    assert result == "rejected:group_requires_imessage_only"
+    sender.assert_not_called()
+    group_sender.assert_not_called()
+
+
+def test_group_chat_applescript_targets_the_chat_id_without_a_participant() -> None:
+    with (
+        patch(
+            "send_only_mac_messages.upstream_messages.run_applescript",
+            side_effect=["iMessage", "success"],
+        ) as script,
+        patch(
+            "send_only_mac_messages.upstream_messages._verify_send_in_db",
+            return_value=SendAttemptOutcome(
+                state=AttemptState.SENT_UNCONFIRMED,
+                actual_transport=MessageTransport.IMESSAGE,
+                correlation_confidence=CorrelationConfidence.EXACT,
+                reason=ObservationReason.GROUP_DELIVERY_NOT_REPORTED,
+            ),
+        ) as observer,
+    ):
+        outcome = _send_message_group_chat(GROUP_CHAT_ID, 'hi "all"')
+
+    preflight_script, sent_script = (call.args[0] for call in script.call_args_list)
+    assert f'chat id "{GROUP_CHAT_ID}"' in preflight_script
+    assert "send " not in preflight_script
+    assert f'to chat id "{GROUP_CHAT_ID}"' in sent_script
+    assert "participant" not in sent_script
+    assert 'hi \\"all\\"' in sent_script
+    assert "service type = SMS" not in sent_script
+    assert observer.call_args.kwargs["chat_guid"] == GROUP_CHAT_ID
+    assert outcome.reason is ObservationReason.GROUP_DELIVERY_NOT_REPORTED
+
+
+@pytest.mark.parametrize(
+    ("preflight", "token"),
+    [
+        ("rejected:unknown_chat_id", "rejected:unknown_chat_id"),
+        ("rejected:chat_not_imessage", "rejected:group_not_imessage"),
+    ],
+)
+def test_group_preflight_rejects_unknown_or_non_imessage_chats_without_sending(
+    preflight: str, token: str
+) -> None:
+    with (
+        patch(
+            "send_only_mac_messages.upstream_messages.run_applescript",
+            return_value=preflight,
+        ) as script,
+        patch(
+            "send_only_mac_messages.upstream_messages._verify_send_in_db"
+        ) as observer,
+    ):
+        result = send_message(GROUP_CHAT_ID, "hello", IMESSAGE_ONLY)
+
+    assert result == token
+    assert script.call_count == 1
+    assert "send " not in script.call_args.args[0]
+    observer.assert_not_called()
+
+
+def test_group_preflight_timeout_is_reported_without_sending() -> None:
+    with (
+        patch(
+            "send_only_mac_messages.upstream_messages.run_applescript",
+            return_value="Error: AppleScript timed out after 30 seconds",
+        ) as script,
+        patch(
+            "send_only_mac_messages.upstream_messages._verify_send_in_db"
+        ) as observer,
+    ):
+        result = send_message(GROUP_CHAT_ID, "hello", IMESSAGE_ONLY)
+
+    assert result == "error:timeout"
+    assert script.call_count == 1
+    observer.assert_not_called()
 
 
 def test_rejects_empty_and_oversized_messages_without_invoking_upstream() -> None:
@@ -617,6 +751,15 @@ def test_structured_outcomes_are_mapped_to_fixed_redacted_tokens() -> None:
                 CorrelationConfidence.EXACT,
             ),
             "error:send_failed:SMS",
+        ),
+        (
+            SendAttemptOutcome(
+                AttemptState.SENT_UNCONFIRMED,
+                MessageTransport.IMESSAGE,
+                CorrelationConfidence.EXACT,
+                ObservationReason.GROUP_DELIVERY_NOT_REPORTED,
+            ),
+            "sent:iMessage:group-delivery-not-reported",
         ),
     ]
 

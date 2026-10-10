@@ -52,6 +52,9 @@ def messages_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             is_from_me INTEGER NOT NULL
         );
         INSERT INTO handle (ROWID, id) VALUES (1, '+14155551234');
+        CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, guid TEXT NOT NULL);
+        CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
+        INSERT INTO chat (ROWID, guid) VALUES (9, 'any;+;chat123456789012345678');
         """
     )
     connection.commit()
@@ -73,15 +76,17 @@ def _insert_message(
     is_delivered: int = 0,
     send_error: int = 0,
     attributed_body: bytes | None = None,
+    chat_rowid: int | None = None,
 ) -> None:
     apple_ns = int((sent_at - 978_307_200) * 1_000_000_000)
     connection = sqlite3.connect(database)
-    connection.execute(
+    # Group rows carry handle_id 0; only the chat join identifies them.
+    cursor = connection.execute(
         """
         INSERT INTO message (
             guid, error, is_sent, is_delivered, service, text,
             attributedBody, handle_id, date, is_from_me
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, 1)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         """,
         (
             "fixture-guid",
@@ -91,9 +96,15 @@ def _insert_message(
             service,
             body,
             attributed_body,
+            0 if chat_rowid is not None else 1,
             apple_ns,
         ),
     )
+    if chat_rowid is not None:
+        connection.execute(
+            "INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)",
+            (chat_rowid, cursor.lastrowid),
+        )
     connection.commit()
     connection.close()
 
@@ -445,3 +456,130 @@ def test_database_connection_is_read_only(tmp_path: Path) -> None:
     with pytest.raises(sqlite3.OperationalError):
         connection.execute("INSERT INTO message VALUES (1)")
     connection.close()
+
+
+GROUP_CHAT_ID = "any;+;chat123456789012345678"
+
+
+def _patched_clock(fake_time: FakeTime):
+    return (
+        patch(
+            "send_only_mac_messages.upstream_messages.time.time",
+            side_effect=fake_time.time,
+        ),
+        patch(
+            "send_only_mac_messages.upstream_messages.time.sleep",
+            side_effect=fake_time.sleep,
+        ),
+    )
+
+
+def test_group_row_is_invisible_to_the_handle_based_observer(messages_db: Path) -> None:
+    sent_at = 2_000_000_000.0
+    _insert_message(
+        messages_db,
+        sent_at=sent_at + 0.1,
+        body="hello",
+        service="iMessage",
+        is_sent=1,
+        chat_rowid=9,
+    )
+    fake_time = FakeTime()
+    clock, sleep = _patched_clock(fake_time)
+    with clock, sleep:
+        outcome = _verify_send_in_db(
+            "+14155551234",
+            sent_at,
+            message_text="hello",
+            service=MessageTransport.IMESSAGE,
+            timeout=0.5,
+        )
+
+    assert outcome.state is AttemptState.UNKNOWN
+    assert outcome.reason is ObservationReason.MESSAGE_NOT_CORRELATED
+
+
+def test_group_row_correlates_by_chat_guid_and_returns_once_sent(
+    messages_db: Path,
+) -> None:
+    sent_at = 2_000_000_000.0
+    _insert_message(
+        messages_db,
+        sent_at=sent_at + 0.1,
+        body="hello",
+        service="iMessage",
+        is_sent=1,
+        chat_rowid=9,
+    )
+    fake_time = FakeTime()
+    clock, sleep = _patched_clock(fake_time)
+    with clock, sleep:
+        outcome = _verify_send_in_db(
+            GROUP_CHAT_ID,
+            sent_at,
+            message_text="hello",
+            service=MessageTransport.IMESSAGE,
+            chat_guid=GROUP_CHAT_ID,
+        )
+
+    assert outcome.state is AttemptState.SENT_UNCONFIRMED
+    assert outcome.reason is ObservationReason.GROUP_DELIVERY_NOT_REPORTED
+    assert outcome.correlation_confidence is CorrelationConfidence.EXACT
+    assert outcome.actual_transport is MessageTransport.IMESSAGE
+    assert fake_time.now < 10.0, "group observer must not wait out the delivery window"
+
+
+def test_group_observer_ignores_same_body_in_another_chat(messages_db: Path) -> None:
+    sent_at = 2_000_000_000.0
+    connection = sqlite3.connect(messages_db)
+    connection.execute("INSERT INTO chat (ROWID, guid) VALUES (10, 'any;+;chat1')")
+    connection.commit()
+    connection.close()
+    _insert_message(
+        messages_db,
+        sent_at=sent_at + 0.1,
+        body="hello",
+        service="iMessage",
+        is_sent=1,
+        chat_rowid=10,
+    )
+    fake_time = FakeTime()
+    clock, sleep = _patched_clock(fake_time)
+    with clock, sleep:
+        outcome = _verify_send_in_db(
+            GROUP_CHAT_ID,
+            sent_at,
+            message_text="hello",
+            service=MessageTransport.IMESSAGE,
+            chat_guid=GROUP_CHAT_ID,
+            timeout=0.5,
+        )
+
+    assert outcome.state is AttemptState.UNKNOWN
+    assert outcome.reason is ObservationReason.MESSAGE_NOT_CORRELATED
+
+
+def test_group_row_error_is_a_definitive_failure(messages_db: Path) -> None:
+    sent_at = 2_000_000_000.0
+    _insert_message(
+        messages_db,
+        sent_at=sent_at + 0.1,
+        body="hello",
+        service="iMessage",
+        send_error=22,
+        chat_rowid=9,
+    )
+    fake_time = FakeTime()
+    clock, sleep = _patched_clock(fake_time)
+    with clock, sleep:
+        outcome = _verify_send_in_db(
+            GROUP_CHAT_ID,
+            sent_at,
+            message_text="hello",
+            service=MessageTransport.IMESSAGE,
+            chat_guid=GROUP_CHAT_ID,
+            timeout=0.5,
+        )
+
+    assert outcome.state is AttemptState.FAILED
+    assert outcome.correlation_confidence is CorrelationConfidence.EXACT

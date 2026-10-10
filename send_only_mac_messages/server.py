@@ -26,8 +26,11 @@ def tool_send_message(
         str,
         Field(
             description=(
-                "Exact phone number. Ten-digit US numbers and E.164-style "
-                "international numbers are accepted; contact names are not."
+                "Exact phone number, or the exact Messages chat id of an existing "
+                "group chat in the form <service>;+;chat<digits> (Heimdall's "
+                "sourceThreadId). Ten-digit US numbers and E.164-style "
+                "international numbers are accepted; contact names are not. "
+                "Chat ids require imessage_only."
             )
         ),
     ],
@@ -59,7 +62,9 @@ def create_mcp(
 ) -> FastMCP:
     """Create the one-tool MCP surface for either stdio or remote transport."""
     instructions = (
-        "Send a message to an exact phone number through macOS Messages. "
+        "Send a message to an exact phone number, or into an existing group chat "
+        "by its exact Messages chat id, through macOS Messages. Group sends are "
+        "imessage_only and report sent, never delivered. "
         "Every call must select imessage_only or imessage_with_sms_fallback. "
         "imessage_only never attempts SMS/RCS. The fallback mode may attempt "
         "SMS/RCS once after an immediate or exactly correlated iMessage failure; "

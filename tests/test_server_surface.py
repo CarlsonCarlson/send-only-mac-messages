@@ -21,6 +21,7 @@ def test_mcp_exposes_exactly_one_send_tool() -> None:
     assert "explicitly selected iMessage-only or fallback policy" in (
         tools[0].description
     )
+    assert "chat id" in tools[0].inputSchema["properties"]["recipient"]["description"]
     assert set(tools[0].inputSchema["properties"]) == {
         "recipient",
         "message",
@@ -65,6 +66,9 @@ def test_only_upstream_subset_contains_local_messages_database_access() -> None:
     assert "JOIN handle" in observer
     assert "m.is_from_me = 1" in observer
     assert "LIMIT 10" in observer
+    # The chat table may appear only as a JOIN filtered to the exact chat guid.
+    assert observer.count("JOIN chat c ON") == 1
+    assert observer.count("c.guid = ?") == 1
     for forbidden in (
         "FROM chat",
         "FROM attachment",
@@ -85,6 +89,7 @@ def test_manifest_declares_only_the_send_tool() -> None:
     assert "iMessage-only never attempts SMS/RCS" in (
         manifest["tools"][0]["description"]
     )
+    assert "group chat" in manifest["tools"][0]["description"]
 
 
 def test_tool_logs_and_result_do_not_echo_send_data(caplog) -> None:

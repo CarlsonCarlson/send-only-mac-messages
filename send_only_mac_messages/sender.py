@@ -12,6 +12,7 @@ from send_only_mac_messages.upstream_messages import (
     ObservationReason,
     SendAttemptOutcome,
     _send_message_direct,
+    _send_message_group_chat,
     _send_message_sms,
     escape_applescript,
     run_applescript,
@@ -28,6 +29,14 @@ IMESSAGE_WITH_SMS_FALLBACK: DeliveryMode = "imessage_with_sms_fallback"
 DELIVERY_MODES = frozenset({IMESSAGE_ONLY, IMESSAGE_WITH_SMS_FALLBACK})
 
 _PHONE_INPUT = re.compile(r"\+?[0-9 ()-]+\Z")
+# Exact Messages chat id of an existing group chat, as chat.guid stores it.
+_CHAT_ID = re.compile(r"(any|iMessage|SMS|RCS);\+;chat[0-9]+\Z")
+
+
+def chat_id_or_none(recipient: str) -> str | None:
+    """Return the exact chat id when the recipient addresses a group chat."""
+    raw = str(recipient).strip()
+    return raw if _CHAT_ID.fullmatch(raw) else None
 
 
 def normalize_phone_number(recipient: str) -> str:
@@ -59,6 +68,11 @@ def _public_result(outcome: object) -> str:
         and outcome.reason is ObservationReason.DELIVERY_TIMEOUT
     ):
         return f"sent-unconfirmed:{service}:delivery-timeout"
+    if (
+        outcome.state is AttemptState.SENT_UNCONFIRMED
+        and outcome.reason is ObservationReason.GROUP_DELIVERY_NOT_REPORTED
+    ):
+        return f"sent:{service}:group-delivery-not-reported"
     if outcome.state is AttemptState.UNKNOWN and outcome.reason in {
         ObservationReason.DATABASE_UNAVAILABLE,
         ObservationReason.MESSAGE_NOT_CORRELATED,
@@ -66,6 +80,10 @@ def _public_result(outcome: object) -> str:
     }:
         return f"error:send_status_unknown:{service}:{outcome.reason.value}"
     if outcome.state is AttemptState.FAILED:
+        if outcome.reason is ObservationReason.UNKNOWN_CHAT_ID:
+            return "rejected:unknown_chat_id"
+        if outcome.reason is ObservationReason.CHAT_NOT_IMESSAGE:
+            return "rejected:group_not_imessage"
         return f"error:send_failed:{service}"
     if outcome.state is AttemptState.TIMEOUT:
         return "error:timeout"
@@ -81,20 +99,28 @@ def send_message(
     *,
     upstream_sender: Callable[[str, str], object] = _send_message_direct,
     sms_sender: Callable[[str, str], object] = _send_message_sms,
+    group_sender: Callable[[str, str], object] = _send_message_group_chat,
 ) -> str:
     """Validate input and execute the requested one-call delivery policy."""
     if delivery_mode not in DELIVERY_MODES:
         return "rejected:invalid_delivery_mode"
 
-    try:
-        normalized_recipient = normalize_phone_number(recipient)
-    except ValueError:
-        return "rejected:invalid_recipient"
+    chat_id = chat_id_or_none(recipient)
+    if chat_id is None:
+        try:
+            normalized_recipient = normalize_phone_number(recipient)
+        except ValueError:
+            return "rejected:invalid_recipient"
+    elif delivery_mode != IMESSAGE_ONLY:
+        return "rejected:group_requires_imessage_only"
 
     if not isinstance(message, str) or not message.strip():
         return "rejected:empty_message"
     if len(message) > MAX_MESSAGE_CHARS:
         return "rejected:message_too_long"
+
+    if chat_id is not None:
+        return _public_result(group_sender(chat_id, message))
 
     outcome = upstream_sender(normalized_recipient, message)
     if (

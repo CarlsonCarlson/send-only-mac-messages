@@ -39,7 +39,7 @@
   "tools": [
     {
       "name": "tool_send_message",
-      "description": "Sends one direct message to an exact phone number through Messages.app using a required explicit delivery mode, then transiently checks its send status. iMessage-only never attempts SMS/RCS. The fallback mode may attempt SMS/RCS once after an immediate or exactly correlated iMessage failure and can duplicate a delayed iMessage. Returns a fixed status without echoing recipient or message content."
+      "description": "Sends one message to an exact phone number, or into an existing group chat by its exact Messages chat id, through Messages.app using a required explicit delivery mode, then transiently checks its send status. iMessage-only never attempts SMS/RCS. The fallback mode may attempt SMS/RCS once after an immediate or exactly correlated iMessage failure and can duplicate a delayed iMessage. Returns a fixed status without echoing recipient or message content. Group chat sends are iMessage-only and report sent rather than delivered."
     }
   ],
   "compatibility": {
