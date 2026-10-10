@@ -6,8 +6,9 @@ message that tool just submitted.
 
 ## Boundary
 
-`tool_send_message(recipient, message, delivery_mode)` accepts an exact phone number,
-text body, and required delivery policy. `delivery_mode` is exactly one of:
+`tool_send_message(recipient, message, delivery_mode)` accepts an exact phone number
+or the exact Messages chat id of an existing group chat, a text body, and a required
+delivery policy. `delivery_mode` is exactly one of:
 
 - `imessage_only`: submit iMessage only and never invoke SMS/RCS.
 - `imessage_with_sms_fallback`: submit iMessage first, then submit SMS/RCS once if
@@ -15,8 +16,13 @@ text body, and required delivery policy. `delivery_mode` is exactly one of:
   remains failed through observation.
 
 Ten-digit US numbers are normalized with `+1`; international numbers may be passed in
-E.164 form. Contact names, email addresses, contact selections, group identifiers,
-and recipient discovery are rejected.
+E.164 form. A group chat is addressed by its exact chat id, `<service>;+;chat<digits>`
+(the `chat.guid` value, which Heimdall returns as `sourceThreadId`); chat ids require
+`imessage_only`, and a read-only Messages.app preflight rejects a chat id Messages does
+not know or that does not run on an iMessage account, so nothing goes out over SMS/RCS.
+The sender never resolves or lists chats. Contact names, email
+addresses, contact selections, group names, participant lists, and recipient discovery
+are rejected.
 
 The repository contains no general message-history query, Contacts integration, chat
 listing, attachments, or later status lookup. After a send is accepted, a fixed
@@ -53,6 +59,7 @@ Results are intentionally narrow:
 - `delivered:SMS`
 - `sent-unconfirmed:iMessage:delivery-timeout`
 - `sent-unconfirmed:SMS:delivery-timeout`
+- `sent:iMessage:group-delivery-not-reported`
 - `error:send_status_unknown:iMessage:database-unavailable`
 - `error:send_status_unknown:SMS:database-unavailable`
 - `error:send_status_unknown:iMessage:message-not-correlated`
@@ -62,6 +69,9 @@ Results are intentionally narrow:
 - `rejected:invalid_recipient`
 - `rejected:empty_message`
 - `rejected:message_too_long`
+- `rejected:group_requires_imessage_only`
+- `rejected:unknown_chat_id`
+- `rejected:group_not_imessage`
 - `error:send_failed:iMessage`
 - `error:send_failed:SMS`
 - `error:timeout`
@@ -75,7 +85,9 @@ polls. The newest-recipient-row heuristic is never authoritative.
 `delivered` means that the resolved Messages row reported delivery; it does not mean
 a human read the message.
 `sent-unconfirmed` means the row was marked sent but its delivery flag was still
-absent when the ten-second window ended. The observer continues polling after
+absent when the ten-second window ended. `sent:iMessage:group-delivery-not-reported`
+means a group-chat row was marked sent; Messages never reports delivery for group
+iMessages, so the observer returns as soon as that row is seen. The observer continues polling after
 `is_sent`. `error:send_status_unknown` distinguishes an unavailable database, a
 message that could not be correlated, and an exact row whose send state remained
 unresolved.

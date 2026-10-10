@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0] - Unreleased
+
+- Accept an exact Messages chat id (`<service>;+;chat<digits>`) as `recipient` to send
+  into an existing group chat (ADR-0008). The caller supplies the id; the adapter still
+  resolves nothing.
+- Reject `imessage_with_sms_fallback` for chat targets with
+  `rejected:group_requires_imessage_only`. A read-only Messages.app preflight returns
+  `rejected:unknown_chat_id` or `rejected:group_not_imessage` before any submission.
+- Correlate group sends through `chat_message_join` to the exact chat guid (group rows
+  have `handle_id = 0`) and return `sent:iMessage:group-delivery-not-reported` as soon
+  as the row is marked sent, since group iMessages never report delivery.
+- Add a project verification skill (`.claude/skills/verify`) that drives the stdio
+  server like a client and proves outcomes from `chat.db`.
+
 ## [0.1.0] - Unreleased
 
 - Rename the fork to `send-only-mac-messages`.
