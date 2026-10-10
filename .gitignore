@@ -69,3 +69,6 @@ secrets/
 # MCPB build artifacts (vendored uv binary + packed extension)
 bin/
 *.mcpb
+
+# Verification run evidence (see .claude/skills/verify)
+verification-evidence/
