@@ -1,7 +1,8 @@
 # Delivery Observation and SMS/RCS Fallback Plan
 
-**Status:** Implemented locally by ADR-0005; deployment and live sends are not
-authorized by this document.
+**Status:** Superseded by ADR-0006 after observed failures caused duplicate transport
+submissions. Retained as historical implementation context; deployment and live
+sends are not authorized by this document.
 
 ## Goal
 

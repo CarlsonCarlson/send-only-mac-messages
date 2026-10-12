@@ -54,6 +54,13 @@ def test_classifies_only_allow_listed_send_outcome_tokens() -> None:
         "send-failed",
         "SMS",
     )
+    assert classify_result(
+        Result([Content("text", "sent:iMessage:group-delivery-not-reported")])
+    ) == ("sent", "iMessage")
+    assert classify_result(
+        Result([Content("text", "rejected:group_requires_imessage_only")])
+    ) == ("rejected", None)
+    assert classify_result(Result([Content("text", "error:busy")])) == ("busy", None)
 
 
 def test_rejects_raw_or_ambiguous_tool_results() -> None:
@@ -72,11 +79,18 @@ def test_rejects_raw_or_ambiguous_tool_results() -> None:
     assert classify_result(
         Result([Content("text", "accepted-unverified:iMessage")])
     ) == ("error", None)
+    assert classify_result(
+        Result([Content("text", "rejected:private recipient detail")])
+    ) == ("error", None)
 
 
 def test_send_failure_does_not_claim_messages_state_was_mutated() -> None:
     assert mutation_evidence("delivered") is True
     assert mutation_evidence("sent-unconfirmed") is True
     assert mutation_evidence("send-status-unknown") is True
+    assert mutation_evidence("sent") is True
+    assert mutation_evidence("rejected") is False
+    assert mutation_evidence("busy") is False
+    assert mutation_evidence("timeout") == "unknown"
     assert mutation_evidence("send-failed") == "unknown"
     assert mutation_evidence("error") == "unknown"

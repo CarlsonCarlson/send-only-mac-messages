@@ -23,8 +23,13 @@ from send_only_mac_messages.auth import (
     load_bearer_verifier,
     parse_authorization_header,
 )
-from send_only_mac_messages.sender import send_message
-from send_only_mac_messages.server import create_mcp
+from send_only_mac_messages.sender import DeliveryMode, send_message
+from send_only_mac_messages.server import (
+    DeliveryModeChoice,
+    MessageText,
+    Recipient,
+    create_mcp,
+)
 
 logger = logging.getLogger("send_only_mac_messages.remote")
 
@@ -216,7 +221,7 @@ def create_remote_application(
     verifier: BearerVerifier,
     *,
     attestor: SenderAttestor | None = None,
-    sender: Callable[[str, str], str] = send_message,
+    sender: Callable[[str, str, DeliveryMode], str] = send_message,
 ) -> AuthenticatedRemoteMCP:
     """Create one authenticated remote application for one logical sender."""
     sender_attestor = attestor or SenderAttestor(
@@ -225,8 +230,12 @@ def create_remote_application(
     )
     send_lock = threading.Lock()
 
-    def remote_send_message(recipient: str, message: str) -> dict[str, str]:
-        """Tries iMessage first and falls back once to SMS/RCS after a definitive failure."""
+    def remote_send_message(
+        recipient: Recipient,
+        message: MessageText,
+        delivery_mode: DeliveryModeChoice,
+    ) -> dict[str, str]:
+        """Send one message after checking this server's sender and lock."""
         if not sender_attestor.attest():
             logger.error("Rejecting outbound request because sender attestation failed")
             return {
@@ -241,7 +250,7 @@ def create_remote_application(
         try:
             return {
                 "sender": settings.logical_sender,
-                "result": sender(recipient, message),
+                "result": sender(recipient, message, delivery_mode),
             }
         finally:
             send_lock.release()
@@ -250,10 +259,11 @@ def create_remote_application(
         remote_send_message,
         structured_output=True,
         remote_instructions=(
-            "Every call requires explicit send authorization. The server may make one "
-            "internal SMS/RCS attempt after an immediate or exactly correlated "
-            "definitive iMessage failure. Clients must never retry a tool-call error, "
-            "timeout, interruption, or missing response; the outcome may be unknown."
+            "Get approval for each message before you call. A valid server token "
+            "does not approve any message. Each result also names the "
+            "sender label of this server. Never repeat a call that timed out, "
+            "lost its connection, or got no response, because the message may "
+            "already have gone out."
         ),
     )
     protocol_server.settings.transport_security = TransportSecuritySettings(

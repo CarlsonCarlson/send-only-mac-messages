@@ -14,8 +14,32 @@ from typing import Any
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from send_only_mac_messages.remote import (
+    REMOTE_RESULT_BUSY,
+    REMOTE_RESULT_SENDER_MISMATCH,
+)
+from send_only_mac_messages.sender import RESULT_TOKENS
+
 EXPECTED_TOOLS = {"tool_send_message"}
 CANARY_PREFIX = "Send-only Mac Messages hosted canary"
+DELIVERY_MODES = ("imessage_only", "imessage_with_sms_fallback", "sms_only")
+SUCCESS_CLASSES = {"delivered", "sent-unconfirmed", "sent"}
+
+
+def _token_class(token: str) -> tuple[str, str | None]:
+    kind, _, rest = token.partition(":")
+    if kind == "error":
+        kind = rest.split(":")[0].replace("_", "-")
+    service = next(
+        (part for part in token.split(":") if part in {"iMessage", "SMS"}), None
+    )
+    return kind, service
+
+
+KNOWN_RESULTS = {
+    token: _token_class(token)
+    for token in (*RESULT_TOKENS, REMOTE_RESULT_SENDER_MISMATCH, REMOTE_RESULT_BUSY)
+}
 
 
 def emit(phase: str, **fields: Any) -> None:
@@ -32,32 +56,17 @@ def classify_result(result: object) -> tuple[str, str | None]:
         for item in getattr(result, "content", [])
         if getattr(item, "type", "") == "text"
     ]
-    for service in ("iMessage", "SMS"):
-        if texts == [f"delivered:{service}"]:
-            return "delivered", service
-    for service in ("iMessage", "SMS"):
-        if texts == [f"sent-unconfirmed:{service}:delivery-timeout"]:
-            return "sent-unconfirmed", service
-        for reason in (
-            "database-unavailable",
-            "message-not-correlated",
-            "send-state-timeout",
-        ):
-            if texts == [f"error:send_status_unknown:{service}:{reason}"]:
-                return "send-status-unknown", service
-        if texts == [f"error:send_failed:{service}"]:
-            return "send-failed", service
+    if len(texts) == 1 and texts[0] in KNOWN_RESULTS:
+        return KNOWN_RESULTS[texts[0]]
     return "error", None
 
 
 def mutation_evidence(result_class: str) -> bool | str:
     """Return sanitized evidence that the invocation reached a submitted message."""
-    if result_class in {
-        "delivered",
-        "sent-unconfirmed",
-        "send-status-unknown",
-    }:
+    if result_class in {*SUCCESS_CLASSES, "send-status-unknown"}:
         return True
+    if result_class in {"rejected", "sender-mismatch", "busy"}:
+        return False
     return "unknown"
 
 
@@ -69,7 +78,7 @@ def read_approved_target() -> str:
     return target
 
 
-async def run(smoke_only: bool) -> int:
+async def run(smoke_only: bool, delivery_mode: str) -> int:
     """Verify the surface and optionally perform exactly one send invocation."""
     send_invoked = False
     target = None if smoke_only else read_approved_target()
@@ -111,7 +120,11 @@ async def run(smoke_only: bool) -> int:
                 send_invoked = True
                 result = await session.call_tool(
                     "tool_send_message",
-                    {"recipient": target, "message": body},
+                    {
+                        "recipient": target,
+                        "message": body,
+                        "delivery_mode": delivery_mode,
+                    },
                 )
                 result_class, service = classify_result(result)
                 messages_mutated = mutation_evidence(result_class)
@@ -126,7 +139,7 @@ async def run(smoke_only: bool) -> int:
                     "stopped",
                     messages_mutated=messages_mutated,
                 )
-                return 0 if result_class in {"delivered", "sent-unconfirmed"} else 1
+                return 0 if result_class in SUCCESS_CLASSES else 1
     except Exception as exc:
         emit(
             "failed",
@@ -143,8 +156,14 @@ def main() -> int:
         action="store_true",
         help="initialize and verify the MCP surface without invoking the send tool",
     )
+    parser.add_argument(
+        "--delivery-mode",
+        choices=DELIVERY_MODES,
+        default="imessage_only",
+        help="delivery policy for an explicitly authorized live invocation",
+    )
     args = parser.parse_args()
-    return asyncio.run(run(args.smoke_only))
+    return asyncio.run(run(args.smoke_only, args.delivery_mode))
 
 
 if __name__ == "__main__":

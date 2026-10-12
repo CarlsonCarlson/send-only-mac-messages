@@ -26,6 +26,7 @@ from send_only_mac_messages.remote import (
     SenderAttestor,
     create_remote_application,
 )
+from send_only_mac_messages.server import TOOL_DESCRIPTION
 
 PUBLIC_HOST = "messages-principal-a.example.com"
 LOGICAL_SENDER = "principal_a"
@@ -133,7 +134,7 @@ def test_authenticated_initialize_reaches_one_tool_protocol_surface() -> None:
     assert response.json()["result"]["serverInfo"]["name"] == ("send-only-mac-messages")
 
 
-def test_remote_tool_description_exposes_sms_fallback_contract() -> None:
+def test_remote_tool_description_exposes_delivery_mode_contract() -> None:
     app = _build_app()
 
     response = asyncio.run(
@@ -151,7 +152,15 @@ def test_remote_tool_description_exposes_sms_fallback_contract() -> None:
     assert response.status_code == 200
     tools = response.json()["result"]["tools"]
     assert [tool["name"] for tool in tools] == ["tool_send_message"]
-    assert "falls back once to SMS/RCS" in tools[0]["description"]
+    assert tools[0]["description"] == TOOL_DESCRIPTION
+    for argument in ("recipient", "message", "delivery_mode"):
+        assert tools[0]["inputSchema"]["properties"][argument]["description"]
+    assert tools[0]["inputSchema"]["properties"]["delivery_mode"]["enum"] == [
+        "imessage_only",
+        "imessage_with_sms_fallback",
+        "sms_only",
+    ]
+    assert "delivery_mode" in tools[0]["inputSchema"]["required"]
 
 
 def test_authenticated_tool_call_attests_sender_and_returns_sender_label() -> None:
@@ -174,9 +183,33 @@ def test_authenticated_tool_call_attests_sender_and_returns_sender_label() -> No
         "sender": LOGICAL_SENDER,
         "result": "error:send_status_unknown:iMessage:message-not-correlated",
     }
-    sender.assert_called_once_with("+14155551234", "private body")
+    sender.assert_called_once_with(
+        "+14155551234",
+        "private body",
+        "imessage_only",
+    )
     assert "+14155551234" not in response.text
     assert "private body" not in response.text
+
+
+@pytest.mark.parametrize("invalid_mode", [None, "automatic"])
+def test_missing_or_invalid_delivery_mode_never_invokes_sender(
+    invalid_mode: str | None,
+) -> None:
+    sender = Mock(return_value="delivered:iMessage")
+    app = _build_app(sender=sender)
+    call = _tool_call()
+    arguments = call["params"]["arguments"]
+    if invalid_mode is None:
+        arguments.pop("delivery_mode")
+    else:
+        arguments["delivery_mode"] = invalid_mode
+
+    response = asyncio.run(_post_json(app, call))
+
+    assert response.status_code == 200
+    assert response.json()["result"]["isError"] is True
+    sender.assert_not_called()
 
 
 def test_sender_attestation_failure_never_invokes_messages() -> None:
@@ -206,9 +239,9 @@ def test_remote_sender_remains_serialized_during_a_long_fallback_call() -> None:
     active_calls = 0
     maximum_active_calls = 0
 
-    def sender(recipient: str, message: str) -> str:
+    def sender(recipient: str, message: str, delivery_mode: str) -> str:
         nonlocal active_calls, maximum_active_calls
-        del recipient, message
+        del recipient, message, delivery_mode
         with counter_lock:
             active_calls += 1
             maximum_active_calls = max(maximum_active_calls, active_calls)
@@ -271,8 +304,8 @@ def _build_app(
     settings = RemoteServerSettings(
         public_host=PUBLIC_HOST,
         logical_sender=LOGICAL_SENDER,
-        expected_user="test-user",
-        expected_uid=501,
+        expected_user=getpass.getuser(),
+        expected_uid=os.geteuid(),
         bearer_digest_path="/not-used",
     )
     verifier = BearerVerifier(
@@ -386,6 +419,7 @@ def _tool_call() -> dict[str, Any]:
             "arguments": {
                 "recipient": "+14155551234",
                 "message": "private body",
+                "delivery_mode": "imessage_only",
             },
         },
     }

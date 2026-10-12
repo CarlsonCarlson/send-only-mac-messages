@@ -1,6 +1,7 @@
 # ADR-0004: Preserve transient delivery observation outcomes
 
-**Status:** Accepted; window, correlation, token, and fallback clauses superseded by ADR-0005
+**Status:** Accepted; window, correlation, and token clauses superseded by ADR-0005;
+observer non-fallback clause reaffirmed by ADR-0006
 
 ## Context
 

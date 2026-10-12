@@ -7,7 +7,8 @@ Upstream provenance:
 Most marked function bodies began in ``mac_messages_mcp/messages.py`` at ``a6e4605``.
 The local transport adapter preserves this fork's stdin-only payload boundary and
 redacts subprocess errors. ADR-0005 replaces the heuristic observer result with an
-exact-attempt structured outcome and one bounded SMS/RCS continuation.
+exact-attempt structured outcome; ADR-0006 permits the bounded SMS/RCS continuation
+only after a synchronous AppleScript failure.
 """
 
 from __future__ import annotations
@@ -288,6 +289,9 @@ class ObservationReason(Enum):
     MESSAGE_NOT_CORRELATED = "message-not-correlated"
     SEND_STATE_TIMEOUT = "send-state-timeout"
     DELIVERY_TIMEOUT = "delivery-timeout"
+    GROUP_DELIVERY_NOT_REPORTED = "group-delivery-not-reported"
+    UNKNOWN_CHAT_ID = "unknown-chat-id"
+    CHAT_NOT_IMESSAGE = "chat-not-imessage"
     APPLESCRIPT_TIMEOUT = "applescript-timeout"
     AUTOMATION_FAILED = "automation-failed"
     UNEXPECTED_RESULT = "unexpected-result"
@@ -334,17 +338,24 @@ def _verify_send_in_db(
     *,
     service: MessageTransport = MessageTransport.IMESSAGE,
     poll_interval: float = OBSERVATION_POLL_INTERVAL_SECONDS,
+    chat_guid: Optional[str] = None,
 ) -> SendAttemptOutcome:
     """
     Poll the Messages database for the outbound message to `recipient`
     recorded after `sent_after_unix`.
 
+    With `chat_guid`, the target is an existing group chat: outgoing group rows
+    carry `handle_id = 0`, so candidates are matched through `chat_message_join`
+    to that exact chat guid instead of a handle. Group iMessages never report
+    `is_delivered`, so a clean `is_sent` row ends the window early as
+    sent-unconfirmed with reason `group-delivery-not-reported`.
+
     The AppleScript `send` command returns without error even when the
     message later fails (e.g. error 22 for an unroutable handle, or a
     recipient who deregistered from iMessage), so the AppleScript result
-    alone cannot confirm a send. The authoritative outcome lives in
-    chat.db's message.error / message.is_sent columns, which are populated
-    within a second or two of the attempt.
+    alone cannot confirm a send. Status evidence appears in chat.db's
+    message.error / message.is_sent / message.is_delivered columns, whose
+    values can change asynchronously during the observation window.
 
     `sent_after_unix` alone is not a reliable correlation key: two sends to
     the same handle close together (e.g. rapid-fire tool calls) can both be
@@ -377,6 +388,23 @@ def _verify_send_in_db(
                 LIMIT 1
             """
             params: tuple[Any, ...] = (pinned_row_id,)
+        elif chat_guid is not None:
+            service_placeholders = ", ".join("?" for _ in compatible_services)
+            query = f"""
+                SELECT m.ROWID AS row_id, m.guid,
+                       m.error AS send_error, m.is_sent, m.is_delivered,
+                       m.service, m.text, m.attributedBody
+                FROM message m
+                JOIN chat_message_join j ON j.message_id = m.ROWID
+                JOIN chat c ON c.ROWID = j.chat_id
+                WHERE m.is_from_me = 1
+                  AND c.guid = ?
+                  AND m.service IN ({service_placeholders})
+                  AND m.date >= ?
+                ORDER BY m.date DESC
+                LIMIT 10
+            """
+            params = (chat_guid,) + compatible_services + (apple_ns,)
         else:
             handle_placeholders = ", ".join("?" for _ in handles)
             service_placeholders = ", ".join("?" for _ in compatible_services)
@@ -400,11 +428,12 @@ def _verify_send_in_db(
             return results
         return []
 
-    variants = _candidate_handles(recipient)
+    variants = [] if chat_guid is not None else _candidate_handles(recipient)
     deadline = time.time() + timeout
     pinned_row_id: Optional[int] = None
     pinned_row_seen = False
     last_sent_transport: Optional[MessageTransport] = None
+    last_failed_transport: Optional[MessageTransport] = None
     while time.time() < deadline:
         rows = _query_rows(variants, pinned_row_id)
         row = rows[0] if pinned_row_id is not None and rows else None
@@ -418,24 +447,34 @@ def _verify_send_in_db(
                 row.get("service"),
                 fallback=service,
             )
-            # A sent flag can precede the delivery flag, so keep polling until
-            # delivery, failure, or the observation window ends.
-            if row.get("send_error"):
-                return SendAttemptOutcome(
-                    state=AttemptState.FAILED,
-                    actual_transport=actual_transport,
-                    correlation_confidence=CorrelationConfidence.EXACT,
-                    fallback_permitted=actual_transport.public_service == "iMessage",
-                )
+            # Database flags can change asynchronously. Delivery is definitive,
+            # while an observed error is not safe evidence for another submission.
             if row.get("is_delivered"):
                 return SendAttemptOutcome(
                     state=AttemptState.DELIVERED,
                     actual_transport=actual_transport,
                     correlation_confidence=CorrelationConfidence.EXACT,
                 )
-            if row.get("is_sent"):
-                last_sent_transport = actual_transport
+            if row.get("send_error"):
+                last_failed_transport = actual_transport
+            else:
+                last_failed_transport = None
+                if row.get("is_sent"):
+                    last_sent_transport = actual_transport
+                    if chat_guid is not None:
+                        return SendAttemptOutcome(
+                            state=AttemptState.SENT_UNCONFIRMED,
+                            actual_transport=actual_transport,
+                            correlation_confidence=CorrelationConfidence.EXACT,
+                            reason=ObservationReason.GROUP_DELIVERY_NOT_REPORTED,
+                        )
         time.sleep(poll_interval)
+    if last_failed_transport is not None:
+        return SendAttemptOutcome(
+            state=AttemptState.FAILED,
+            actual_transport=last_failed_transport,
+            correlation_confidence=CorrelationConfidence.EXACT,
+        )
     if last_sent_transport is not None:
         return SendAttemptOutcome(
             state=AttemptState.SENT_UNCONFIRMED,
@@ -510,6 +549,8 @@ def _execute_transport_attempt(
     message: str,
     service: MessageTransport,
     script: str,
+    *,
+    chat_guid: Optional[str] = None,
 ) -> SendAttemptOutcome:
     """Execute and observe one transport submission without retaining attempt state."""
     try:
@@ -521,6 +562,14 @@ def _execute_transport_attempt(
         )
         if script_outcome is not None:
             return script_outcome
+        if chat_guid is not None:
+            return _verify_send_in_db(
+                recipient,
+                sent_at,
+                message,
+                service=service,
+                chat_guid=chat_guid,
+            )
         return _verify_send_in_db(
             recipient,
             sent_at,
@@ -617,6 +666,102 @@ def _send_message_direct(recipient: str, message: str) -> SendAttemptOutcome:
         MessageTransport.IMESSAGE,
         script,
     )
+
+
+def _group_chat_preflight(chat_guid: str) -> Optional[SendAttemptOutcome]:
+    """
+    Ask Messages.app, without sending, whether the chat exists and runs on an
+    iMessage account. AppleScript `send ... to chat id` uses the chat's own
+    service, so this is what makes a group send iMessage-only in practice.
+    Returns ``None`` when the send may proceed.
+    """
+    safe_chat_guid = escape_applescript(chat_guid)
+    script = f"""
+    tell application "Messages"
+        try
+            set targetChat to chat id "{safe_chat_guid}"
+            get id of targetChat
+        on error
+            return "rejected:unknown_chat_id"
+        end try
+        try
+            if (service type of account of targetChat) is iMessage then return "iMessage"
+            return "rejected:chat_not_imessage"
+        on error
+            return "rejected:chat_not_imessage"
+        end try
+    end tell
+    """
+    result = run_applescript(script).strip()
+    if result == "iMessage":
+        return None
+    reasons = {
+        "rejected:unknown_chat_id": ObservationReason.UNKNOWN_CHAT_ID,
+        "rejected:chat_not_imessage": ObservationReason.CHAT_NOT_IMESSAGE,
+    }
+    if result in reasons:
+        return SendAttemptOutcome(
+            state=AttemptState.FAILED,
+            actual_transport=MessageTransport.IMESSAGE,
+            correlation_confidence=CorrelationConfidence.NONE,
+            reason=reasons[result],
+        )
+    outcome = _script_result_outcome(result, MessageTransport.IMESSAGE)
+    if outcome is None or outcome.state is AttemptState.FAILED:
+        return SendAttemptOutcome(
+            state=AttemptState.UNEXPECTED_RESULT,
+            actual_transport=MessageTransport.IMESSAGE,
+            correlation_confidence=CorrelationConfidence.NONE,
+            reason=ObservationReason.UNEXPECTED_RESULT,
+        )
+    return outcome
+
+
+def _send_message_group_chat(chat_guid: str, message: str) -> SendAttemptOutcome:
+    """
+    Submit one iMessage into an existing group chat addressed by its exact
+    Messages chat id (the `chat.guid` value, e.g. `any;+;chat123`).
+
+    Group sends are iMessage-only: a read-only preflight rejects unknown and
+    non-iMessage chats, and the outer adapter never pairs a group send with
+    the SMS/RCS continuation. Observation correlates through the chat guid.
+    """
+    try:
+        preflight = _group_chat_preflight(chat_guid)
+    except Exception:
+        return SendAttemptOutcome(
+            state=AttemptState.UNEXPECTED_RESULT,
+            actual_transport=MessageTransport.IMESSAGE,
+            correlation_confidence=CorrelationConfidence.NONE,
+            reason=ObservationReason.UNEXPECTED_RESULT,
+        )
+    if preflight is not None:
+        return preflight
+
+    safe_message = escape_applescript(message)
+    safe_chat_guid = escape_applescript(chat_guid)
+
+    script = f"""
+    tell application "Messages"
+        try
+            set targetChat to chat id "{safe_chat_guid}"
+            send "{safe_message}" to targetChat
+            delay 2
+            return "success"
+        on error errMsg
+            return "error:" & errMsg
+        end try
+    end tell
+    """
+
+    return _execute_transport_attempt(
+        chat_guid,
+        message,
+        MessageTransport.IMESSAGE,
+        script,
+        chat_guid=chat_guid,
+    )
+
 
 # fmt: on
 # END ADAPTED UPSTREAM SUBSET

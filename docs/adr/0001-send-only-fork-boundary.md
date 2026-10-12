@@ -1,6 +1,7 @@
 # ADR-0001: Reduce the tested fork to one outbound tool
 
-**Status:** Accepted; delivery-observation clauses superseded by ADR-0003
+**Status:** Accepted; result vocabulary superseded by ADR-0005 and fallback policy
+superseded in part by ADR-0006
 
 ## Context
 
@@ -22,9 +23,11 @@ tool: a direct send to a raw phone number. It has no Contacts access, contact-na
 group resolution, message or chat database access, attachments, MCP resources, MCP
 prompts, Full Disk Access requirement, or Heimdall connection.
 
-Keep immediate iMessage-to-SMS fallback for now. Return only fixed
-accepted-unverified, rejected, or error tokens. Send payloads reach `osascript` over
-standard input rather than arguments or environment variables.
+Keep immediate iMessage-to-SMS fallback for now. Return only fixed, redacted outcome
+tokens. Treat command acceptance without an observed message state as unknown, not as
+evidence that a message was sent or delivered. ADR-0005 defines the current result
+vocabulary. Send payloads reach `osascript` over standard input rather than arguments
+or environment variables.
 
 Apple's Blocked Contacts behavior remains outside the adapter. A Heimdall-hidden
 conversation remains unreadable but is not automatically unsendable.
@@ -35,7 +38,8 @@ conversation remains unreadable but is not automatically unsendable.
 - The adapter cannot resolve a name, inspect a thread, choose a group, fetch an
   attachment, or verify delivery from `chat.db`.
 - SMS fallback depends on the hosted Mac and paired iPhone's Messages configuration.
-- `accepted-unverified:iMessage` and `accepted-unverified:SMS` mean command
-  acceptance, not delivery.
+- Command acceptance alone is not a success outcome. The current contract separates
+  confirmed delivery, confirmed sending without observed delivery, unknown send
+  state, and definitive failure.
 - Any future read capability, recipient discovery, group sending, delivery observer,
   custom blocklist, or second MCP tool requires a new architecture decision.
