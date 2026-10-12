@@ -201,8 +201,10 @@ Terminal app. The approved phone handle arrives through a mode-600 FIFO; sanitiz
 status contains only phase, canary ID, service, and outcome class. A failed or
 interrupted post-invocation result is never retried automatically. Unknown-status
 tokens prove that a submission reached Messages.app. A definitive-failure token may
-instead represent an immediate failure, so mutation remains unknown. The harness
-returns failure unless the final result is delivered or sent-unconfirmed.
+instead represent an immediate failure, so mutation remains unknown. Rejected, busy,
+and sender-mismatch tokens prove nothing was sent. The harness accepts every result
+string the tool can return, and returns failure unless the final result is delivered,
+sent-unconfirmed, or the group `sent` token.
 Live harness sends default to `imessage_only`; selecting
 `--delivery-mode imessage_with_sms_fallback` explicitly authorizes the one possible
 SMS/RCS continuation.
