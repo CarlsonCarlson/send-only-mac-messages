@@ -23,10 +23,12 @@ MAX_MESSAGE_CHARS = 4_000
 DeliveryMode: TypeAlias = Literal[
     "imessage_only",
     "imessage_with_sms_fallback",
+    "sms_only",
 ]
 IMESSAGE_ONLY: DeliveryMode = "imessage_only"
 IMESSAGE_WITH_SMS_FALLBACK: DeliveryMode = "imessage_with_sms_fallback"
-DELIVERY_MODES = frozenset({IMESSAGE_ONLY, IMESSAGE_WITH_SMS_FALLBACK})
+SMS_ONLY: DeliveryMode = "sms_only"
+DELIVERY_MODES = frozenset({IMESSAGE_ONLY, IMESSAGE_WITH_SMS_FALLBACK, SMS_ONLY})
 
 _PHONE_INPUT = re.compile(r"\+?[0-9 ()-]+\Z")
 # Exact Messages chat id of an existing group chat, as chat.guid stores it.
@@ -148,6 +150,8 @@ def send_message(
 
     if chat_id is not None:
         return _public_result(group_sender(chat_id, message))
+    if delivery_mode == SMS_ONLY:
+        return _public_result(sms_sender(normalized_recipient, message))
 
     outcome = upstream_sender(normalized_recipient, message)
     if (

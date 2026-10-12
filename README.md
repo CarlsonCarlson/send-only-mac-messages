@@ -14,6 +14,7 @@ delivery policy. `delivery_mode` is exactly one of:
 - `imessage_with_sms_fallback`: submit iMessage first, then submit SMS/RCS once if
   AppleScript rejects iMessage immediately or the exact correlated iMessage row
   remains failed through observation.
+- `sms_only`: submit SMS/RCS once and never invoke iMessage. Chat ids are rejected.
 
 Ten-digit US numbers are normalized with `+1`; international numbers may be passed in
 E.164 form. A group chat is addressed by its exact chat id, such as
@@ -44,10 +45,18 @@ either a synchronous iMessage AppleScript failure or an exactly correlated,
 database-observed `error:send_failed:iMessage`. The SMS/RCS attempt gets its own start
 timestamp and observation window.
 
+`sms_only` calls the SMS/RCS transport exactly once and never calls iMessage, so it
+cannot fall back in either direction. It is for a caller that already knows a
+number has no iMessage, for example from earlier message history. That caller gets
+one attempt and leaves one bubble in the sender's thread, where fallback mode would
+leave a failed iMessage beside the SMS. `sms_only` with a chat id returns
+`rejected:group_requires_imessage_only` before Messages.app. See
+[ADR-0009](docs/adr/0009-sms-only-delivery-mode.md).
+
 Fallback after a database-observed failure deliberately accepts duplicate-delivery
 risk: a row can report an asynchronous error before the recipient later receives the
 iMessage. Unknown status, sent-unconfirmed, timeout, interruption, missing response,
-or a non-correlated outcome never authorizes fallback in either mode. Use
+or a non-correlated outcome never authorizes fallback in any mode. Use
 `imessage_only` when duplicate-free transport isolation matters more than reaching an
 SMS/RCS destination.
 

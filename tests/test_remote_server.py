@@ -158,6 +158,7 @@ def test_remote_tool_description_exposes_delivery_mode_contract() -> None:
     assert tools[0]["inputSchema"]["properties"]["delivery_mode"]["enum"] == [
         "imessage_only",
         "imessage_with_sms_fallback",
+        "sms_only",
     ]
     assert "delivery_mode" in tools[0]["inputSchema"]["required"]
 

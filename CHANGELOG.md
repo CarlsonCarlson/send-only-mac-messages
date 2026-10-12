@@ -20,6 +20,10 @@
   and whether the caller may call again. Local and remote servers now show the same
   description and argument descriptions. Argument names, mode values, and result
   strings are unchanged.
+- Add a third delivery mode, `sms_only` (ADR-0009). It makes one SMS/RCS attempt and
+  never tries iMessage, so a caller that already knows a number has no iMessage
+  leaves one bubble instead of a failed iMessage plus the SMS. Chat ids with
+  `sms_only` return `rejected:group_requires_imessage_only`.
 - Add a project verification skill (`.claude/skills/verify`) that drives the stdio
   server like a client and proves outcomes from `chat.db`.
 

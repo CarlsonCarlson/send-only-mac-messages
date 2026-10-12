@@ -16,9 +16,10 @@ _Avoid_: Messages MCP, general Messages bridge
 
 **Group chat id recipient**:
 The exact Messages chat id of an existing group chat, such as `any;+;chat12345` or
-`any;+;<32 hex characters>`, as `chat.guid` stores it and as Heimdall's `sourceThreadId` reports it. The caller
-supplies it; the adapter never lists, searches, or resolves chats. Chat targets are
-iMessage-only and report `sent`, never `delivered`.
+`any;+;<32 hex characters>`, as `chat.guid` stores it and as Heimdall's
+`sourceThreadId` reports it. The caller supplies it; the adapter never lists,
+searches, or resolves chats. Chat targets are iMessage-only and report `sent`, never
+`delivered`.
 _Avoid_: Group name, participant list, discovered group
 
 **Raw phone-number recipient**:
@@ -66,8 +67,10 @@ iMessage and never invokes SMS/RCS. `imessage_with_sms_fallback` submits through
 iMessage first and may submit SMS/RCS exactly once after either a synchronous
 AppleScript failure or an exactly correlated database-observed failure. The latter
 explicitly accepts the known risk that a delayed iMessage and the fallback can both
-arrive. Unknown, timed-out, interrupted, missing, or non-correlated outcomes never
-authorize fallback or retry. Omitted or invalid modes fail before Messages.app.
+arrive. `sms_only` submits through SMS/RCS exactly once and never invokes iMessage,
+for a caller that already knows the number has no iMessage. Unknown, timed-out,
+interrupted, missing, or non-correlated outcomes never authorize fallback or retry.
+Omitted or invalid modes fail before Messages.app.
 _Avoid_: Automatic transport selection, implicit SMS permission
 
 **Send-status unknown**:

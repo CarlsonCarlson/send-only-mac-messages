@@ -4,7 +4,7 @@
   "display_name": "Send-only Mac Messages",
   "version": "0.3.0",
   "description": "Send one text through macOS Messages and report what Messages did with it.",
-  "long_description": "A local MCP server with one tool that sends one text through Messages.app. It sends to a phone number, or into an existing iMessage group by its chat id. Every call picks a delivery mode. imessage_only never sends SMS. imessage_with_sms_fallback sends the text once as SMS if the iMessage fails, which can leave two bubbles and can deliver the text twice. After sending, it checks only that one message in the Messages database for up to 10 seconds. It cannot read conversations, look up contacts, list chats, or check a message later.",
+  "long_description": "A local MCP server with one tool that sends one text through Messages.app. It sends to a phone number, or into an existing iMessage group by its chat id. Every call picks a delivery mode. imessage_only never sends SMS. sms_only sends one SMS and never tries iMessage. imessage_with_sms_fallback sends the text once as SMS if the iMessage fails, which can leave two bubbles and can deliver the text twice. After sending, it checks only that one message in the Messages database for up to 10 seconds. It cannot read conversations, look up contacts, list chats, or check a message later.",
   "author": {
     "name": "Carlson Cheng"
   },
@@ -39,7 +39,7 @@
   "tools": [
     {
       "name": "tool_send_message",
-      "description": "Sends one text through Messages.app to a phone number, or into an existing iMessage group by its chat id. Every call picks a delivery mode. imessage_only never sends SMS. imessage_with_sms_fallback sends the text once as SMS if the iMessage fails, which can leave two bubbles and can deliver the text twice. Groups need imessage_only. Returns one fixed result string that never repeats the number or the text. The server's tool description explains every result string."
+      "description": "Sends one text through Messages.app to a phone number, or into an existing iMessage group by its chat id. Every call picks a delivery mode. imessage_only never sends SMS. sms_only sends one SMS and never tries iMessage. imessage_with_sms_fallback sends the text once as SMS if the iMessage fails, which can leave two bubbles and can deliver the text twice. Groups need imessage_only. Returns one fixed result string that never repeats the number or the text. The server's tool description explains every result string."
     }
   ],
   "compatibility": {

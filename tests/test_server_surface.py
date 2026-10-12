@@ -37,6 +37,7 @@ def test_mcp_exposes_exactly_one_send_tool() -> None:
     assert tools[0].inputSchema["properties"]["delivery_mode"]["enum"] == [
         "imessage_only",
         "imessage_with_sms_fallback",
+        "sms_only",
     ]
     assert tools[0].annotations is not None
     assert tools[0].annotations.readOnlyHint is False
@@ -51,7 +52,7 @@ def test_tool_description_explains_every_result_token() -> None:
     for token in (*RESULT_TOKENS, REMOTE_RESULT_SENDER_MISMATCH, REMOTE_RESULT_BUSY):
         generic = re.sub(r":(iMessage|SMS)\b", ":<service>", token)
         assert token in description or generic in description, token
-    for mode in ("imessage_only", "imessage_with_sms_fallback"):
+    for mode in ("imessage_only", "imessage_with_sms_fallback", "sms_only"):
         assert mode in description
     assert "two bubbles" in description
     assert "twice" in description
@@ -100,7 +101,7 @@ def test_manifest_declares_only_the_send_tool() -> None:
 
     assert [tool["name"] for tool in manifest["tools"]] == ["tool_send_message"]
     description = manifest["tools"][0]["description"]
-    for mode in ("imessage_only", "imessage_with_sms_fallback"):
+    for mode in ("imessage_only", "imessage_with_sms_fallback", "sms_only"):
         assert mode in description
     assert "group" in description
 

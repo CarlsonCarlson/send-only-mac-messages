@@ -35,6 +35,11 @@ Every call sends a real message. Never repeat a call after a timeout, an error, 
 or a missing response unless the result below says you may. A repeated call can \
 send the text twice.
 
+Modes. imessage_only sends one iMessage and never sends SMS. sms_only sends one \
+SMS and never tries iMessage. Use sms_only when you already know the number has \
+no iMessage, so the person gets one message and the sender's thread shows one \
+bubble. imessage_with_sms_fallback tries iMessage first and may also send SMS.
+
 Fallback risk. In imessage_with_sms_fallback mode, if Messages reports that the \
 iMessage failed, the tool sends the same text once more as SMS. The sender's \
 thread then shows two bubbles, the failed iMessage and the SMS. If the iMessage \
@@ -51,7 +56,9 @@ sent. Messages never reports delivery for groups, so this is the success result 
 for a group. Do not send again.
 - error:send_failed:<service>. Messages reported that the send failed on that \
 service. For iMessage this usually means the number has no iMessage. A delayed \
-iMessage can still arrive. Do not repeat the call.
+iMessage can still arrive. Do not repeat the call. If the number has no \
+iMessage, a person can decide to send again in sms_only mode, knowing that a late \
+iMessage would make two messages.
 - error:send_status_unknown:<service>:database-unavailable. Messages accepted the \
 send, but the tool could not open the Messages database to check it. The message \
 may have gone out. Never call again.
@@ -115,6 +122,8 @@ DeliveryModeChoice = Annotated[
     Field(
         description=(
             "Required. imessage_only sends one iMessage and never sends SMS. "
+            "sms_only sends one SMS and never tries iMessage. Use it when you "
+            "already know the number has no iMessage. "
             "imessage_with_sms_fallback sends iMessage first. If Messages reports "
             "that the iMessage failed, it sends the same text once as SMS. That "
             "can leave two bubbles in the sender's thread and can deliver the "
@@ -145,7 +154,8 @@ def create_mcp(
         "This server sends text messages through Messages.app on one Mac. It has "
         "one tool, tool_send_message. Every call sends a real message, so call it "
         "once per message. Choose delivery_mode on every call. imessage_only sends "
-        "one iMessage and never sends SMS. imessage_with_sms_fallback sends the "
+        "one iMessage and never sends SMS. sms_only sends one SMS and never tries "
+        "iMessage. imessage_with_sms_fallback sends the "
         "text once as SMS if the iMessage fails, which can leave two bubbles and "
         "can deliver the text twice. Group chats need imessage_only. The tool "
         "cannot read conversations, look up contacts, or list chats. Allow at "

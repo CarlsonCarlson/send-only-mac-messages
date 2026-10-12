@@ -11,6 +11,7 @@ from send_only_mac_messages.sender import (
     IMESSAGE_ONLY,
     IMESSAGE_WITH_SMS_FALLBACK,
     MAX_MESSAGE_CHARS,
+    SMS_ONLY,
     escape_applescript,
     normalize_phone_number,
     run_applescript,
@@ -115,6 +116,67 @@ def test_chat_id_recipient_rejects_sms_fallback_mode_before_messages() -> None:
     assert result == "rejected:group_requires_imessage_only"
     sender.assert_not_called()
     group_sender.assert_not_called()
+
+
+def test_chat_id_recipient_rejects_sms_only_mode_before_any_sender() -> None:
+    sender = Mock()
+    sms_sender = Mock()
+    group_sender = Mock()
+
+    result = send_message(
+        HEX_GROUP_CHAT_ID,
+        "hello",
+        SMS_ONLY,
+        upstream_sender=sender,
+        sms_sender=sms_sender,
+        group_sender=group_sender,
+    )
+
+    assert result == "rejected:group_requires_imessage_only"
+    sender.assert_not_called()
+    sms_sender.assert_not_called()
+    group_sender.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("sms_outcome", "expected"),
+    [
+        (
+            SendAttemptOutcome(
+                AttemptState.DELIVERED,
+                MessageTransport.RCS,
+                CorrelationConfidence.EXACT,
+            ),
+            "delivered:SMS",
+        ),
+        (
+            SendAttemptOutcome(
+                AttemptState.FAILED,
+                MessageTransport.SMS,
+                CorrelationConfidence.NONE,
+            ),
+            "error:send_failed:SMS",
+        ),
+    ],
+)
+def test_sms_only_makes_one_sms_attempt_and_never_tries_imessage(
+    sms_outcome: SendAttemptOutcome,
+    expected: str,
+) -> None:
+    imessage_sender = Mock()
+    sms_sender = Mock(return_value=sms_outcome)
+
+    result = send_message(
+        "4155551234",
+        "hello",
+        SMS_ONLY,
+        upstream_sender=imessage_sender,
+        sms_sender=sms_sender,
+    )
+
+    assert result == expected
+    sms_sender.assert_called_once_with("+14155551234", "hello")
+    imessage_sender.assert_not_called()
 
 
 def test_group_chat_applescript_targets_the_chat_id_without_a_participant() -> None:
