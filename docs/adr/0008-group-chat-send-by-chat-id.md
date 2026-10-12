@@ -48,7 +48,14 @@ direct phone path is unchanged, including its observer call.
   `sourceThreadId` is that id.
 - A group result is "sent", never "delivered". Callers must not wait for or infer
   delivery.
-- Chat ids are per Messages database. An id from one Mac means nothing on another.
+- Chat ids are per Messages database. An id from one Mac means nothing on another;
+  the same group was `any;+;chat<digits>` on one Mac and `any;+;<32 hex>` on
+  another (checked 2026-10-12).
+- Messages exposes only loaded conversations to scripting, roughly the recently
+  active ones. A quiet group returns `rejected:unknown_chat_id` until any member
+  posts in it again. Observed 2026-10-12 on the hosted Mac: a group last used 17 days
+  earlier, ranked about 626th by recency, was rejected; one incoming message later it
+  accepted the send.
 - The sender alias is the chat's existing `last_addressed_handle`; the tool cannot
   change which number a group shows the message from.
 - Verified live on 2026-10-07 from a local Mac into an existing three-person group

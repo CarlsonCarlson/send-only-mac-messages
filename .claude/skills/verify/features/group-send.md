@@ -30,6 +30,7 @@ Preconditions:
 
 - Group iMessages on macOS 26 never flip `is_delivered`; do not wait for `delivered:*`.
 - `chat.service_name` in `chat.db` can be stale: two groups labelled `SMS` there carry only iMessage traffic now and Messages reports their account as iMessage. The preflight asks Messages.app, not the database, and that is the authority.
+- `rejected:unknown_chat_id` also fires for a real iMessage group that Messages has not loaded (quiet groups outside the recent set). Have any member post in the group, then retry. Proven on the hosted Mac 2026-10-12.
 - Messages exposes almost no SMS/RCS group chats to scripting (local sample: 92 such groups in `chat.db`, none addressable by `chat id`), so a group that really runs on SMS/RCS can never be a target. One-on-one fallback is different: it addresses a person on the SMS account, not a chat.
 - The sender alias is the chat's `last_addressed_handle`; check it before promising which number the recipients will see. `account_login` is only the Apple ID login and says nothing about which number the message shows from.
 - Group rows usually have `text` NULL with the body in `attributedBody`; the driver decodes it. A SQL `text =` match misses them.

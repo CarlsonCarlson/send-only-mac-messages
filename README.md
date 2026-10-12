@@ -21,7 +21,9 @@ E.164 form. A group chat is addressed by its exact chat id, such as
 `any;+;chat12345` or `any;+;<32 hex characters>` (the `chat.guid` value, which
 Heimdall returns as `sourceThreadId`); chat ids require `imessage_only`, and a
 read-only Messages.app preflight rejects a chat id Messages does not know or that does
-not run on an iMessage account, so nothing goes out over SMS/RCS.
+not run on an iMessage account, so nothing goes out over SMS/RCS. Messages exposes only
+loaded (roughly recent) conversations to scripting, so a quiet group is rejected as
+unknown until a member posts in it again.
 The sender never resolves or lists chats. Contact names, email
 addresses, contact selections, group names, participant lists, and recipient discovery
 are rejected.

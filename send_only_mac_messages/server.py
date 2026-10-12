@@ -83,7 +83,10 @@ chat id.
 - rejected:empty_message. The message is empty.
 - rejected:message_too_long. The message is longer than 4,000 characters.
 - rejected:group_requires_imessage_only. A group chat id needs imessage_only.
-- rejected:unknown_chat_id. Messages on this Mac has no chat with that id.
+- rejected:unknown_chat_id. Messages on this Mac did not find a chat with that id. \
+Messages only exposes conversations it has loaded, roughly the recent ones, so a \
+quiet group can be rejected even though it exists. A new message in that group \
+from any member makes it addressable again.
 - rejected:group_not_imessage. That chat is not an iMessage chat.
 - rejected:invalid_delivery_mode. delivery_mode is not one of the allowed values.
 
