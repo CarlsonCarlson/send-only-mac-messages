@@ -11,6 +11,15 @@
 - Correlate group sends through `chat_message_join` to the exact chat guid (group rows
   have `handle_id = 0`) and return `sent:iMessage:group-delivery-not-reported` as soon
   as the row is marked sent, since group iMessages never report delivery.
+- Also accept 32-hex-character group chat ids (`any;+;<32 hex characters>`), which
+  Messages uses alongside `chat<digits>`. The pattern is now
+  `(any|iMessage|SMS|RCS);+;[A-Za-z0-9]+`; the read-only preflight still rejects any
+  chat Messages does not know or that is not on iMessage.
+- Rewrite the tool description, argument descriptions, and server instructions in
+  plain words. The tool description now lists every result string, what causes it,
+  and whether the caller may call again. Local and remote servers now show the same
+  description and argument descriptions. Argument names, mode values, and result
+  strings are unchanged.
 - Add a project verification skill (`.claude/skills/verify`) that drives the stdio
   server like a client and proves outcomes from `chat.db`.
 

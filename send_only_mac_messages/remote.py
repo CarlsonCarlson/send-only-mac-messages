@@ -24,7 +24,12 @@ from send_only_mac_messages.auth import (
     parse_authorization_header,
 )
 from send_only_mac_messages.sender import DeliveryMode, send_message
-from send_only_mac_messages.server import create_mcp
+from send_only_mac_messages.server import (
+    DeliveryModeChoice,
+    MessageText,
+    Recipient,
+    create_mcp,
+)
 
 logger = logging.getLogger("send_only_mac_messages.remote")
 
@@ -226,11 +231,11 @@ def create_remote_application(
     send_lock = threading.Lock()
 
     def remote_send_message(
-        recipient: str,
-        message: str,
-        delivery_mode: DeliveryMode,
+        recipient: Recipient,
+        message: MessageText,
+        delivery_mode: DeliveryModeChoice,
     ) -> dict[str, str]:
-        """Sends with the explicitly selected iMessage-only or fallback policy."""
+        """Send one message after checking this server's sender and lock."""
         if not sender_attestor.attest():
             logger.error("Rejecting outbound request because sender attestation failed")
             return {
@@ -254,12 +259,11 @@ def create_remote_application(
         remote_send_message,
         structured_output=True,
         remote_instructions=(
-            "Every call requires explicit send authorization and delivery mode. "
-            "imessage_only never attempts SMS/RCS. The fallback mode may make one "
-            "SMS/RCS attempt after an immediate or exactly correlated iMessage "
-            "failure and therefore carries duplicate-delivery risk. Clients must "
-            "never retry a tool-call error, "
-            "timeout, interruption, or missing response; the outcome may be unknown."
+            "Get approval for each message before you call. A valid server token "
+            "does not approve any message. Each result also names the "
+            "sender label of this server. Never repeat a call that timed out, "
+            "lost its connection, or got no response, because the message may "
+            "already have gone out."
         ),
     )
     protocol_server.settings.transport_security = TransportSecuritySettings(

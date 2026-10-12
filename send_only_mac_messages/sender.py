@@ -30,7 +30,34 @@ DELIVERY_MODES = frozenset({IMESSAGE_ONLY, IMESSAGE_WITH_SMS_FALLBACK})
 
 _PHONE_INPUT = re.compile(r"\+?[0-9 ()-]+\Z")
 # Exact Messages chat id of an existing group chat, as chat.guid stores it.
-_CHAT_ID = re.compile(r"(any|iMessage|SMS|RCS);\+;chat[0-9]+\Z")
+# Messages uses both chat<digits> and 32-hex-character group guids.
+_CHAT_ID = re.compile(r"(any|iMessage|SMS|RCS);\+;[A-Za-z0-9]+\Z")
+
+RESULT_TOKENS = (
+    "delivered:iMessage",
+    "delivered:SMS",
+    "sent-unconfirmed:iMessage:delivery-timeout",
+    "sent-unconfirmed:SMS:delivery-timeout",
+    "sent:iMessage:group-delivery-not-reported",
+    "error:send_failed:iMessage",
+    "error:send_failed:SMS",
+    "error:send_status_unknown:iMessage:database-unavailable",
+    "error:send_status_unknown:SMS:database-unavailable",
+    "error:send_status_unknown:iMessage:message-not-correlated",
+    "error:send_status_unknown:SMS:message-not-correlated",
+    "error:send_status_unknown:iMessage:send-state-timeout",
+    "error:send_status_unknown:SMS:send-state-timeout",
+    "error:timeout",
+    "error:automation_failed",
+    "error:unexpected_result",
+    "rejected:invalid_recipient",
+    "rejected:empty_message",
+    "rejected:message_too_long",
+    "rejected:group_requires_imessage_only",
+    "rejected:unknown_chat_id",
+    "rejected:group_not_imessage",
+    "rejected:invalid_delivery_mode",
+)
 
 
 def chat_id_or_none(recipient: str) -> str | None:

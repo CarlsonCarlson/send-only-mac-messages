@@ -15,8 +15,8 @@ or Heimdall.
 _Avoid_: Messages MCP, general Messages bridge
 
 **Group chat id recipient**:
-The exact Messages chat id of an existing group chat, `<service>;+;chat<digits>`,
-as `chat.guid` stores it and as Heimdall's `sourceThreadId` reports it. The caller
+The exact Messages chat id of an existing group chat, such as `any;+;chat12345` or
+`any;+;<32 hex characters>`, as `chat.guid` stores it and as Heimdall's `sourceThreadId` reports it. The caller
 supplies it; the adapter never lists, searches, or resolves chats. Chat targets are
 iMessage-only and report `sent`, never `delivered`.
 _Avoid_: Group name, participant list, discovered group

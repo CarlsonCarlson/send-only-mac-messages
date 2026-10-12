@@ -27,6 +27,7 @@ from send_only_mac_messages.upstream_messages import (
 )
 
 GROUP_CHAT_ID = "any;+;chat123456789012345678"
+HEX_GROUP_CHAT_ID = "any;+;0123456789abcdef0123456789abcdef"
 
 
 @pytest.mark.parametrize(
@@ -52,7 +53,8 @@ def test_normalizes_raw_phone_numbers(raw: str, normalized: str) -> None:
         "+1234567890123456",
         "chat123456789012345678",
         "any;-;+14155551234",
-        "any;+;chat",
+        "any;+;",
+        "any;+;chat 1",
         "group:Buyers",
     ],
 )
@@ -71,7 +73,9 @@ def test_rejects_every_recipient_form_except_phone_numbers_and_chat_ids(
     group_sender.assert_not_called()
 
 
-@pytest.mark.parametrize("chat_id", [GROUP_CHAT_ID, "iMessage;+;chat12345"])
+@pytest.mark.parametrize(
+    "chat_id", [GROUP_CHAT_ID, "iMessage;+;chat12345", HEX_GROUP_CHAT_ID]
+)
 def test_chat_id_recipient_routes_to_the_group_sender(chat_id: str) -> None:
     sender = Mock()
     group_sender = Mock(

@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from unittest.mock import patch
 
+from send_only_mac_messages.remote import (
+    REMOTE_RESULT_BUSY,
+    REMOTE_RESULT_SENDER_MISMATCH,
+)
+from send_only_mac_messages.sender import RESULT_TOKENS
 from send_only_mac_messages.server import mcp, tool_send_message
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,10 +23,6 @@ def test_mcp_exposes_exactly_one_send_tool() -> None:
     tools = asyncio.run(mcp.list_tools())
 
     assert [tool.name for tool in tools] == ["tool_send_message"]
-    assert tools[0].description is not None
-    assert "explicitly selected iMessage-only or fallback policy" in (
-        tools[0].description
-    )
     assert "chat id" in tools[0].inputSchema["properties"]["recipient"]["description"]
     assert set(tools[0].inputSchema["properties"]) == {
         "recipient",
@@ -41,6 +43,18 @@ def test_mcp_exposes_exactly_one_send_tool() -> None:
     assert tools[0].annotations.destructiveHint is True
     assert tools[0].annotations.idempotentHint is False
     assert tools[0].annotations.openWorldHint is True
+
+
+def test_tool_description_explains_every_result_token() -> None:
+    description = asyncio.run(mcp.list_tools())[0].description or ""
+
+    for token in (*RESULT_TOKENS, REMOTE_RESULT_SENDER_MISMATCH, REMOTE_RESULT_BUSY):
+        generic = re.sub(r":(iMessage|SMS)\b", ":<service>", token)
+        assert token in description or generic in description, token
+    for mode in ("imessage_only", "imessage_with_sms_fallback"):
+        assert mode in description
+    assert "two bubbles" in description
+    assert "twice" in description
 
 
 def test_mcp_exposes_no_resources_or_prompts() -> None:
@@ -85,11 +99,10 @@ def test_manifest_declares_only_the_send_tool() -> None:
     manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
 
     assert [tool["name"] for tool in manifest["tools"]] == ["tool_send_message"]
-    assert "required explicit delivery mode" in (manifest["tools"][0]["description"])
-    assert "iMessage-only never attempts SMS/RCS" in (
-        manifest["tools"][0]["description"]
-    )
-    assert "group chat" in manifest["tools"][0]["description"]
+    description = manifest["tools"][0]["description"]
+    for mode in ("imessage_only", "imessage_with_sms_fallback"):
+        assert mode in description
+    assert "group" in description
 
 
 def test_tool_logs_and_result_do_not_echo_send_data(caplog) -> None:

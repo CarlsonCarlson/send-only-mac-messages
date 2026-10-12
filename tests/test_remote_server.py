@@ -26,6 +26,7 @@ from send_only_mac_messages.remote import (
     SenderAttestor,
     create_remote_application,
 )
+from send_only_mac_messages.server import TOOL_DESCRIPTION
 
 PUBLIC_HOST = "messages-principal-a.example.com"
 LOGICAL_SENDER = "principal_a"
@@ -151,9 +152,9 @@ def test_remote_tool_description_exposes_delivery_mode_contract() -> None:
     assert response.status_code == 200
     tools = response.json()["result"]["tools"]
     assert [tool["name"] for tool in tools] == ["tool_send_message"]
-    assert "explicitly selected iMessage-only or fallback policy" in (
-        tools[0]["description"]
-    )
+    assert tools[0]["description"] == TOOL_DESCRIPTION
+    for argument in ("recipient", "message", "delivery_mode"):
+        assert tools[0]["inputSchema"]["properties"][argument]["description"]
     assert tools[0]["inputSchema"]["properties"]["delivery_mode"]["enum"] == [
         "imessage_only",
         "imessage_with_sms_fallback",
