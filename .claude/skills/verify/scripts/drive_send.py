@@ -119,7 +119,9 @@ def wait_for_proof(db_path: Path, body: str, sent_after: float, target: str) -> 
     return rows
 
 
-async def drive(send: bool, delivery_mode: str, evidence_dir: Path) -> int:
+async def drive(
+    send: bool, delivery_mode: str, evidence_dir: Path, message: str | None = None
+) -> int:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
@@ -171,7 +173,7 @@ async def drive(send: bool, delivery_mode: str, evidence_dir: Path) -> int:
                     exit_code = 1
 
                 if send:
-                    body = f"verify-send {run_id}"
+                    body = message if message else f"verify-send {run_id}"
                     evidence["body"] = body
                     sent_after = time.time()
                     result = await session.call_tool(
@@ -266,10 +268,16 @@ def main() -> int:
     parser.add_argument(
         "--evidence-dir", type=Path, default=Path("verification-evidence")
     )
+    parser.add_argument(
+        "--message",
+        help="exact body to send instead of the default 'verify-send <run_id>'",
+    )
     args = parser.parse_args()
     if args.self_test:
         return self_test()
-    return asyncio.run(drive(args.send, args.delivery_mode, args.evidence_dir))
+    return asyncio.run(
+        drive(args.send, args.delivery_mode, args.evidence_dir, args.message)
+    )
 
 
 if __name__ == "__main__":
