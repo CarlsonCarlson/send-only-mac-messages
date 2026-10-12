@@ -137,7 +137,10 @@ def main() -> int:
     while time.monotonic() < deadline:
         if pinned_row_id is None:
             rows = query_candidates(connection, recipient, sent_after_unix)
-            row = next((candidate for candidate in rows if row_text(candidate) == message), None)
+            row = next(
+                (candidate for candidate in rows if row_text(candidate) == message),
+                None,
+            )
             if row is not None:
                 pinned_row_id = int(row["row_id"])
         else:

@@ -16,7 +16,9 @@ CLEAR = "\x1b[2J\x1b[H"
 def render(state: State) -> None:
     print(CLEAR, end="")
     print(f"{BOLD}PROTOTYPE — numeric iMessage error terminality{RESET}")
-    print(f"{DIM}Does a local numeric error ever justify a second SMS submission?{RESET}\n")
+    print(
+        f"{DIM}Does a local numeric error ever justify a second SMS submission?{RESET}\n"
+    )
     visible = {
         "elapsed_seconds": state.elapsed_seconds,
         "pinned_row_id": state.pinned_row_id,

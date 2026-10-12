@@ -105,7 +105,9 @@ def proof_rows(db_path: Path, body: str, sent_after: float, target: str) -> list
     ]
 
 
-def wait_for_proof(db_path: Path, body: str, sent_after: float, target: str) -> list[dict]:
+def wait_for_proof(
+    db_path: Path, body: str, sent_after: float, target: str
+) -> list[dict]:
     deadline = time.time() + DB_PROOF_SECONDS
     rows: list[dict] = []
     while time.time() < deadline:
@@ -242,8 +244,14 @@ def self_test() -> int:
         assert [r["row_id"] for r in rows] == [7], rows
         assert rows[0]["chat_guid"] == "any;+;chat1" and rows[0]["handle_id"] == 0
         # attributedBody-only row in another chat is found by bytes, and only for its chat
-        assert [r["row_id"] for r in proof_rows(db, "body", APPLE_EPOCH_OFFSET + 1, "any;+;chat2")] == [9]
-        assert [r["row_id"] for r in proof_rows(db, "body", APPLE_EPOCH_OFFSET + 1, "(415) 555-1234")] == [10]
+        assert [
+            r["row_id"]
+            for r in proof_rows(db, "body", APPLE_EPOCH_OFFSET + 1, "any;+;chat2")
+        ] == [9]
+        assert [
+            r["row_id"]
+            for r in proof_rows(db, "body", APPLE_EPOCH_OFFSET + 1, "(415) 555-1234")
+        ] == [10]
     print("self-test ok")
     return 0
 
