@@ -33,7 +33,7 @@ DELIVERY_MODES = frozenset({IMESSAGE_ONLY, IMESSAGE_WITH_SMS_FALLBACK, SMS_ONLY}
 _PHONE_INPUT = re.compile(r"\+?[0-9 ()-]+\Z")
 # Exact Messages chat id of an existing group chat, as chat.guid stores it.
 # Messages uses both chat<digits> and 32-hex-character group guids.
-_CHAT_ID = re.compile(r"(any|iMessage|SMS|RCS);\+;[A-Za-z0-9]+\Z")
+_CHAT_ID = re.compile(r"(any|iMessage|SMS|RCS);\+;(chat[0-9]+|[0-9a-f]{32})\Z")
 
 RESULT_TOKENS = (
     "delivered:iMessage",

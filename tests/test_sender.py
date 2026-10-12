@@ -56,6 +56,8 @@ def test_normalizes_raw_phone_numbers(raw: str, normalized: str) -> None:
         "any;-;+14155551234",
         "any;+;",
         "any;+;chat 1",
+        "any;+;4155551234",
+        "any;+;45e63ccd188b4e7b845fc32c6927f69",
         "group:Buyers",
     ],
 )

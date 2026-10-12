@@ -1,6 +1,14 @@
 # Changelog
 
-## [0.3.0] - Unreleased
+## [0.3.1] - 2026-10-12
+
+- Correct the result glossary after the first hosted group test: `rejected:unknown_chat_id`
+  means Messages has not loaded the chat (quiet groups), `error:send_failed` can still
+  reach the person, and `imessage_only` cannot stop Messages itself from switching a
+  failed iMessage to SMS. Tighten the chat id pattern to `chat<digits>` or 32 hex.
+  Raise the suggested client timeout to 90 seconds.
+
+## [0.3.0] - 2026-10-12
 
 - Accept an exact Messages chat id (`<service>;+;chat<digits>`) as `recipient` to send
   into an existing group chat (ADR-0008). The caller supplies the id; the adapter still

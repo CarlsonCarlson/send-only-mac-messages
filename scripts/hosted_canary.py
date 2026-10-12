@@ -22,7 +22,7 @@ from send_only_mac_messages.sender import RESULT_TOKENS
 
 EXPECTED_TOOLS = {"tool_send_message"}
 CANARY_PREFIX = "Send-only Mac Messages hosted canary"
-DELIVERY_MODES = ("imessage_only", "imessage_with_sms_fallback")
+DELIVERY_MODES = ("imessage_only", "imessage_with_sms_fallback", "sms_only")
 SUCCESS_CLASSES = {"delivered", "sent-unconfirmed", "sent"}
 
 

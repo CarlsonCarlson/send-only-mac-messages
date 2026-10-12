@@ -1,6 +1,6 @@
 # ADR-0009: Add an `sms_only` delivery mode
 
-**Status:** Accepted
+**Status:** Proposed. Shipped in 0.3.0 behind an explicit mode value; no caller uses it and no live send has exercised it. Carlson decides whether campaigns may use it.
 
 ## Context
 

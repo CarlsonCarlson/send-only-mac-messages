@@ -35,10 +35,11 @@ Every call sends a real message. Never repeat a call after a timeout, an error, 
 or a missing response unless the result below says you may. A repeated call can \
 send the text twice.
 
-Modes. imessage_only sends one iMessage and never sends SMS. sms_only sends one \
-SMS and never tries iMessage. Use sms_only when you already know the number has \
-no iMessage, so the person gets one message and the sender's thread shows one \
-bubble. imessage_with_sms_fallback tries iMessage first and may also send SMS.
+Modes. imessage_only asks Messages for one iMessage and never adds an SMS attempt \
+of its own; Messages itself may still switch a failed iMessage to SMS, and the \
+result then names SMS. sms_only asks for one SMS and never tries iMessage; use it \
+only when the caller's own rules allow SMS and the number is known to lack \
+iMessage. imessage_with_sms_fallback tries iMessage first and may also send SMS.
 
 Fallback risk. In imessage_with_sms_fallback mode, if Messages reports that the \
 iMessage failed, the tool sends the same text once more as SMS. The sender's \
@@ -55,10 +56,10 @@ again.
 sent. Messages never reports delivery for groups, so this is the success result \
 for a group. Do not send again.
 - error:send_failed:<service>. Messages reported that the send failed on that \
-service. For iMessage this usually means the number has no iMessage. A delayed \
-iMessage can still arrive. Do not repeat the call. If the number has no \
-iMessage, a person can decide to send again in sms_only mode, knowing that a late \
-iMessage would make two messages.
+service. For iMessage this usually means the number has no iMessage. The text may \
+still reach the person: a delayed iMessage can arrive, and Messages on some Macs \
+switches a failed iMessage to SMS on its own. Do not repeat the call in any mode. \
+Report the result and let a person decide.
 - error:send_status_unknown:<service>:database-unavailable. Messages accepted the \
 send, but the tool could not open the Messages database to check it. The message \
 may have gone out. Never call again.
@@ -76,8 +77,8 @@ outcome is unknown. Never call again.
 - error:unexpected_result. The tool got an answer it does not recognize. The \
 outcome is unknown. Never call again.
 
-A rejected result means the tool refused the call before sending anything. Fix \
-the input and call again.
+A rejected result means the tool refused the call before sending anything. For \
+every rejected result except unknown_chat_id, fix the input and call again.
 - rejected:invalid_recipient. The recipient is not a phone number or a group \
 chat id.
 - rejected:empty_message. The message is empty.
@@ -85,8 +86,8 @@ chat id.
 - rejected:group_requires_imessage_only. A group chat id needs imessage_only.
 - rejected:unknown_chat_id. Messages on this Mac did not find a chat with that id. \
 Messages only exposes conversations it has loaded, roughly the recent ones, so a \
-quiet group can be rejected even though it exists. A new message in that group \
-from any member makes it addressable again.
+quiet group can be rejected even though it exists. Do not post into the group to \
+wake it. Report the result; once a member has posted there, the same id works.
 - rejected:group_not_imessage. That chat is not an iMessage chat.
 - rejected:invalid_delivery_mode. delivery_mode is not one of the allowed values.
 
@@ -124,9 +125,10 @@ DeliveryModeChoice = Annotated[
     DeliveryMode,
     Field(
         description=(
-            "Required. imessage_only sends one iMessage and never sends SMS. "
-            "sms_only sends one SMS and never tries iMessage. Use it when you "
-            "already know the number has no iMessage. "
+            "Required. imessage_only asks for one iMessage and never adds an SMS "
+            "attempt of its own. sms_only asks for one SMS and never tries "
+            "iMessage; use it only when your own rules allow SMS and the number "
+            "is known to lack iMessage. "
             "imessage_with_sms_fallback sends iMessage first. If Messages reports "
             "that the iMessage failed, it sends the same text once as SMS. That "
             "can leave two bubbles in the sender's thread and can deliver the "
@@ -156,13 +158,14 @@ def create_mcp(
     instructions = (
         "This server sends text messages through Messages.app on one Mac. It has "
         "one tool, tool_send_message. Every call sends a real message, so call it "
-        "once per message. Choose delivery_mode on every call. imessage_only sends "
-        "one iMessage and never sends SMS. sms_only sends one SMS and never tries "
-        "iMessage. imessage_with_sms_fallback sends the "
+        "once per message. Choose delivery_mode on every call. imessage_only asks "
+        "for one iMessage and adds no SMS attempt of its own. sms_only asks for one "
+        "SMS and never tries iMessage. imessage_with_sms_fallback sends the "
         "text once as SMS if the iMessage fails, which can leave two bubbles and "
         "can deliver the text twice. Group chats need imessage_only. The tool "
         "cannot read conversations, look up contacts, or list chats. Allow at "
-        "least 40 seconds for one call. The tool description lists every result "
+        "least 90 seconds for one call; a group send or a fallback send can take "
+        "that long. The tool description lists every result "
         "string, what causes it, and whether you may call again."
     )
     if remote_instructions:
