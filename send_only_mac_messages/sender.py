@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Literal, TypeAlias
+from zoneinfo import ZoneInfo
 
 from send_only_mac_messages.upstream_messages import (
     AttemptState,
@@ -19,6 +21,9 @@ from send_only_mac_messages.upstream_messages import (
 )
 
 MAX_MESSAGE_CHARS = 4_000
+# Kevin's line sends nothing from 8pm to 8am Pacific (Carlson, 2026-10-27).
+QUIET_HOURS_ZONE = ZoneInfo("America/Los_Angeles")
+QUIET_HOURS_START, QUIET_HOURS_END = 20, 8
 
 DeliveryMode: TypeAlias = Literal[
     "imessage_only",
@@ -59,7 +64,18 @@ RESULT_TOKENS = (
     "rejected:unknown_chat_id",
     "rejected:group_not_imessage",
     "rejected:invalid_delivery_mode",
+    "rejected:quiet_hours",
 )
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def in_quiet_hours(moment: datetime) -> bool:
+    """True from 8pm up to 8am Pacific, whatever zone `moment` carries."""
+    hour = moment.astimezone(QUIET_HOURS_ZONE).hour
+    return hour >= QUIET_HOURS_START or hour < QUIET_HOURS_END
 
 
 def chat_id_or_none(recipient: str) -> str | None:
@@ -129,8 +145,11 @@ def send_message(
     upstream_sender: Callable[[str, str], object] = _send_message_direct,
     sms_sender: Callable[[str, str], object] = _send_message_sms,
     group_sender: Callable[[str, str], object] = _send_message_group_chat,
+    clock: Callable[[], datetime] | None = None,
 ) -> str:
     """Validate input and execute the requested one-call delivery policy."""
+    if in_quiet_hours((clock or utc_now)()):
+        return "rejected:quiet_hours"
     if delivery_mode not in DELIVERY_MODES:
         return "rejected:invalid_delivery_mode"
 

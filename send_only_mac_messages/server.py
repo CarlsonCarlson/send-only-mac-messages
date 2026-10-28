@@ -78,7 +78,12 @@ outcome is unknown. Never call again.
 outcome is unknown. Never call again.
 
 A rejected result means the tool refused the call before sending anything. For \
-every rejected result except unknown_chat_id, fix the input and call again.
+every rejected result except unknown_chat_id and quiet_hours, fix the input and \
+call again.
+- rejected:quiet_hours. It is between 8pm and 8am Pacific, when this line sends \
+nothing. The tool checked the time before looking at the input or touching \
+Messages, so nothing was sent. Do not call again tonight; keep the message for the \
+next morning's run after 8am Pacific.
 - rejected:invalid_recipient. The recipient is not a phone number or a group \
 chat id.
 - rejected:empty_message. The message is empty.
