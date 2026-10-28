@@ -51,6 +51,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 cd "$REPO_ROOT"
 
+# The branch name goes to the hosted Mac as an SSH argument; an empty one is dropped there.
+if [ -z "$(git branch --show-current)" ]; then
+  echo "HEAD is detached. Check out the branch to deploy (for example group-chat-send) and run again; nothing was changed." >&2
+  exit 2
+fi
+
 HOSTED_MAC_SSH_TARGET="${HOSTED_MAC_SSH_TARGET:-kevinhom@192.30.129.13}"
 HOSTED_MAC_PASSWORD_FILE="${HOSTED_MAC_PASSWORD_FILE:-secrets/hosted-mac-ssh-password}"
 UV_VERSION="${UV_VERSION:-0.11.19}"
