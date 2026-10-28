@@ -84,6 +84,7 @@ Results are intentionally narrow:
 - `rejected:group_requires_imessage_only`
 - `rejected:unknown_chat_id`
 - `rejected:group_not_imessage`
+- `rejected:quiet_hours` (8pm to 8am Pacific; checked before anything else, nothing sent)
 - `error:send_failed:iMessage`
 - `error:send_failed:SMS`
 - `error:timeout`

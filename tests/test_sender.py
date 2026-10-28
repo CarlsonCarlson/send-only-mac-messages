@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
+from datetime import datetime
 from unittest.mock import Mock, patch
 
 import pytest
@@ -904,3 +906,79 @@ def test_timeout_is_reported_without_retrying() -> None:
         )
 
     mocked_run.assert_called_once()
+
+
+# Kevin's line sends nothing from 8pm to 8am Pacific (Carlson, 2026-10-27:
+# "no more sending past 8pm"). Each test passes the moment in as `clock`.
+def _at(moment: str) -> Callable[[], datetime]:
+    return lambda: datetime.fromisoformat(moment)
+
+
+@pytest.mark.parametrize(
+    ("moment", "sends"),
+    [
+        ("2026-10-27T19:59:59-07:00", True),
+        ("2026-10-27T20:00:00-07:00", False),
+        ("2026-10-28T07:59:59-07:00", False),
+        ("2026-10-28T08:00:00-07:00", True),
+        ("2026-12-02T03:59:59+00:00", True),  # 7:59:59 pm PST
+        ("2026-12-02T04:00:00+00:00", False),  # 8:00 pm PST
+        ("2026-10-28T03:00:00+00:00", False),  # 8:00 pm PDT
+    ],
+)
+def test_quiet_hours_refuse_before_messages_is_touched(
+    moment: str, sends: bool
+) -> None:
+    outcome = SendAttemptOutcome(
+        AttemptState.DELIVERED, MessageTransport.IMESSAGE, CorrelationConfidence.EXACT
+    )
+    sender = Mock(return_value=outcome)
+
+    result = send_message(
+        "4155551234", "hello", IMESSAGE_ONLY, upstream_sender=sender, clock=_at(moment)
+    )
+
+    if sends:
+        assert result == "delivered:iMessage"
+        sender.assert_called_once()
+    else:
+        assert result == "rejected:quiet_hours"
+        sender.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", [IMESSAGE_ONLY, IMESSAGE_WITH_SMS_FALLBACK, SMS_ONLY])
+def test_quiet_hours_cover_every_mode_and_groups(mode: str) -> None:
+    senders = {
+        name: Mock() for name in ("upstream_sender", "sms_sender", "group_sender")
+    }
+    night = _at("2026-10-27T23:00:00-07:00")
+
+    assert send_message("4155551234", "hello", mode, clock=night, **senders) == (  # type: ignore[arg-type]
+        "rejected:quiet_hours"
+    )
+    assert send_message(
+        GROUP_CHAT_ID, "hello", IMESSAGE_ONLY, clock=night, **senders
+    ) == ("rejected:quiet_hours")
+    for sender in senders.values():
+        sender.assert_not_called()
+
+
+def test_quiet_hours_come_before_input_checks() -> None:
+    assert (
+        send_message(
+            "not a number",
+            "hello",
+            IMESSAGE_ONLY,
+            clock=_at("2026-10-27T21:00:00-07:00"),
+        )
+        == "rejected:quiet_hours"
+    )
+    assert (
+        send_message(
+            "not a number",
+            "hello",
+            IMESSAGE_ONLY,
+            clock=_at("2026-10-27T12:00:00-07:00"),
+        )
+        == "rejected:invalid_recipient"
+    )

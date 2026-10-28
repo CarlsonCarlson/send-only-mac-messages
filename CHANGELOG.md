@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2] - 2026-10-27
+
+- Refuse every send from 8pm to 8am Pacific with `rejected:quiet_hours` (Carlson,
+  2026-10-27: "no more sending past 8pm"). The check runs first, before input checks
+  and before Messages.app is touched, so it covers every caller of this server, cloud
+  routines included. The time is read in America/Los_Angeles, so the edge follows
+  daylight saving. `send_message` takes an optional `clock` for tests.
+
 ## [0.3.1] - 2026-10-12
 
 - Correct the result glossary after the first hosted group test: `rejected:unknown_chat_id`
