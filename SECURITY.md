@@ -18,8 +18,9 @@ expected transport, then pins the exact row identifier while that attempt remain
 in flight. A newest-recipient-row heuristic cannot determine status or authorize a
 second submission. The generic query helper is internal and is not exposed as an MCP
 tool. Candidate rows are not retained after the call. One SMS/RCS fallback is
-permitted after an immediate or exactly correlated definitive iMessage failure;
-later ambiguous outcomes never authorize a retry.
+permitted only after a synchronous iMessage AppleScript failure. A database-observed
+failure is final for the call and cannot authorize a second submission; later
+ambiguous outcomes never authorize a retry.
 
 The send payload is supplied to `osascript` over standard input. Recipient and body
 must not be added to arguments, environment variables, logs, tool results, fixtures,

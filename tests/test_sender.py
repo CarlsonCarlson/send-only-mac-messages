@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
+from datetime import datetime
 from unittest.mock import Mock, patch
 
 import pytest
 
 from send_only_mac_messages.sender import (
+    IMESSAGE_ONLY,
+    IMESSAGE_WITH_SMS_FALLBACK,
     MAX_MESSAGE_CHARS,
+    SMS_ONLY,
     escape_applescript,
     normalize_phone_number,
     run_applescript,
@@ -20,8 +25,12 @@ from send_only_mac_messages.upstream_messages import (
     MessageTransport,
     ObservationReason,
     SendAttemptOutcome,
+    _send_message_group_chat,
     _send_message_sms,
 )
+
+GROUP_CHAT_ID = "any;+;chat123456789012345678"
+HEX_GROUP_CHAT_ID = "any;+;0123456789abcdef0123456789abcdef"
 
 
 @pytest.mark.parametrize(
@@ -39,15 +48,212 @@ def test_normalizes_raw_phone_numbers(raw: str, normalized: str) -> None:
 
 @pytest.mark.parametrize(
     "recipient",
-    ["Carlson Cheng", "carlson@example.com", "contact:1", "12345", "+1234567890123456"],
+    [
+        "Carlson Cheng",
+        "carlson@example.com",
+        "contact:1",
+        "12345",
+        "+1234567890123456",
+        "chat123456789012345678",
+        "any;-;+14155551234",
+        "any;+;",
+        "any;+;chat 1",
+        "any;+;4155551234",
+        "any;+;45e63ccd188b4e7b845fc32c6927f69",
+        "group:Buyers",
+    ],
 )
-def test_rejects_every_recipient_form_except_phone_numbers(recipient: str) -> None:
+def test_rejects_every_recipient_form_except_phone_numbers_and_chat_ids(
+    recipient: str,
+) -> None:
     sender = Mock()
+    group_sender = Mock()
     assert (
-        send_message(recipient, "hello", upstream_sender=sender)
+        send_message(
+            recipient, "hello", upstream_sender=sender, group_sender=group_sender
+        )
         == "rejected:invalid_recipient"
     )
     sender.assert_not_called()
+    group_sender.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "chat_id", [GROUP_CHAT_ID, "iMessage;+;chat12345", HEX_GROUP_CHAT_ID]
+)
+def test_chat_id_recipient_routes_to_the_group_sender(chat_id: str) -> None:
+    sender = Mock()
+    group_sender = Mock(
+        return_value=SendAttemptOutcome(
+            state=AttemptState.SENT_UNCONFIRMED,
+            actual_transport=MessageTransport.IMESSAGE,
+            correlation_confidence=CorrelationConfidence.EXACT,
+            reason=ObservationReason.GROUP_DELIVERY_NOT_REPORTED,
+        )
+    )
+
+    result = send_message(
+        f"  {chat_id} ",
+        "hello",
+        IMESSAGE_ONLY,
+        upstream_sender=sender,
+        group_sender=group_sender,
+    )
+
+    assert result == "sent:iMessage:group-delivery-not-reported"
+    group_sender.assert_called_once_with(chat_id, "hello")
+    sender.assert_not_called()
+
+
+def test_chat_id_recipient_rejects_sms_fallback_mode_before_messages() -> None:
+    sender = Mock()
+    group_sender = Mock()
+
+    result = send_message(
+        GROUP_CHAT_ID,
+        "hello",
+        IMESSAGE_WITH_SMS_FALLBACK,
+        upstream_sender=sender,
+        group_sender=group_sender,
+    )
+
+    assert result == "rejected:group_requires_imessage_only"
+    sender.assert_not_called()
+    group_sender.assert_not_called()
+
+
+def test_chat_id_recipient_rejects_sms_only_mode_before_any_sender() -> None:
+    sender = Mock()
+    sms_sender = Mock()
+    group_sender = Mock()
+
+    result = send_message(
+        HEX_GROUP_CHAT_ID,
+        "hello",
+        SMS_ONLY,
+        upstream_sender=sender,
+        sms_sender=sms_sender,
+        group_sender=group_sender,
+    )
+
+    assert result == "rejected:group_requires_imessage_only"
+    sender.assert_not_called()
+    sms_sender.assert_not_called()
+    group_sender.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("sms_outcome", "expected"),
+    [
+        (
+            SendAttemptOutcome(
+                AttemptState.DELIVERED,
+                MessageTransport.RCS,
+                CorrelationConfidence.EXACT,
+            ),
+            "delivered:SMS",
+        ),
+        (
+            SendAttemptOutcome(
+                AttemptState.FAILED,
+                MessageTransport.SMS,
+                CorrelationConfidence.NONE,
+            ),
+            "error:send_failed:SMS",
+        ),
+    ],
+)
+def test_sms_only_makes_one_sms_attempt_and_never_tries_imessage(
+    sms_outcome: SendAttemptOutcome,
+    expected: str,
+) -> None:
+    imessage_sender = Mock()
+    sms_sender = Mock(return_value=sms_outcome)
+
+    result = send_message(
+        "4155551234",
+        "hello",
+        SMS_ONLY,
+        upstream_sender=imessage_sender,
+        sms_sender=sms_sender,
+    )
+
+    assert result == expected
+    sms_sender.assert_called_once_with("+14155551234", "hello")
+    imessage_sender.assert_not_called()
+
+
+def test_group_chat_applescript_targets_the_chat_id_without_a_participant() -> None:
+    with (
+        patch(
+            "send_only_mac_messages.upstream_messages.run_applescript",
+            side_effect=["iMessage", "success"],
+        ) as script,
+        patch(
+            "send_only_mac_messages.upstream_messages._verify_send_in_db",
+            return_value=SendAttemptOutcome(
+                state=AttemptState.SENT_UNCONFIRMED,
+                actual_transport=MessageTransport.IMESSAGE,
+                correlation_confidence=CorrelationConfidence.EXACT,
+                reason=ObservationReason.GROUP_DELIVERY_NOT_REPORTED,
+            ),
+        ) as observer,
+    ):
+        outcome = _send_message_group_chat(GROUP_CHAT_ID, 'hi "all"')
+
+    preflight_script, sent_script = (call.args[0] for call in script.call_args_list)
+    assert f'chat id "{GROUP_CHAT_ID}"' in preflight_script
+    assert "send " not in preflight_script
+    assert f'to chat id "{GROUP_CHAT_ID}"' in sent_script
+    assert "participant" not in sent_script
+    assert 'hi \\"all\\"' in sent_script
+    assert "service type = SMS" not in sent_script
+    assert observer.call_args.kwargs["chat_guid"] == GROUP_CHAT_ID
+    assert outcome.reason is ObservationReason.GROUP_DELIVERY_NOT_REPORTED
+
+
+@pytest.mark.parametrize(
+    ("preflight", "token"),
+    [
+        ("rejected:unknown_chat_id", "rejected:unknown_chat_id"),
+        ("rejected:chat_not_imessage", "rejected:group_not_imessage"),
+    ],
+)
+def test_group_preflight_rejects_unknown_or_non_imessage_chats_without_sending(
+    preflight: str, token: str
+) -> None:
+    with (
+        patch(
+            "send_only_mac_messages.upstream_messages.run_applescript",
+            return_value=preflight,
+        ) as script,
+        patch(
+            "send_only_mac_messages.upstream_messages._verify_send_in_db"
+        ) as observer,
+    ):
+        result = send_message(GROUP_CHAT_ID, "hello", IMESSAGE_ONLY)
+
+    assert result == token
+    assert script.call_count == 1
+    assert "send " not in script.call_args.args[0]
+    observer.assert_not_called()
+
+
+def test_group_preflight_timeout_is_reported_without_sending() -> None:
+    with (
+        patch(
+            "send_only_mac_messages.upstream_messages.run_applescript",
+            return_value="Error: AppleScript timed out after 30 seconds",
+        ) as script,
+        patch(
+            "send_only_mac_messages.upstream_messages._verify_send_in_db"
+        ) as observer,
+    ):
+        result = send_message(GROUP_CHAT_ID, "hello", IMESSAGE_ONLY)
+
+    assert result == "error:timeout"
+    assert script.call_count == 1
+    observer.assert_not_called()
 
 
 def test_rejects_empty_and_oversized_messages_without_invoking_upstream() -> None:
@@ -68,13 +274,49 @@ def test_rejects_empty_and_oversized_messages_without_invoking_upstream() -> Non
     sender.assert_not_called()
 
 
-def test_exact_imessage_failure_falls_back_to_sms_exactly_once() -> None:
+def test_rejects_invalid_delivery_mode_without_invoking_upstream() -> None:
+    sender = Mock()
+
+    result = send_message(  # type: ignore[arg-type]
+        "+14155551234",
+        "hello",
+        "automatic",
+        upstream_sender=sender,
+    )
+
+    assert result == "rejected:invalid_delivery_mode"
+    sender.assert_not_called()
+
+
+def test_imessage_only_exact_observed_failure_does_not_submit_sms() -> None:
     imessage_sender = Mock(
         return_value=SendAttemptOutcome(
             state=AttemptState.FAILED,
             actual_transport=MessageTransport.IMESSAGE,
             correlation_confidence=CorrelationConfidence.EXACT,
             fallback_permitted=True,
+        )
+    )
+    sms_sender = Mock()
+
+    result = send_message(
+        "+14155551234",
+        "hello",
+        upstream_sender=imessage_sender,
+        sms_sender=sms_sender,
+    )
+
+    imessage_sender.assert_called_once_with("+14155551234", "hello")
+    sms_sender.assert_not_called()
+    assert result == "error:send_failed:iMessage"
+
+
+def test_fallback_mode_exact_observed_failure_submits_sms_once() -> None:
+    imessage_sender = Mock(
+        return_value=SendAttemptOutcome(
+            state=AttemptState.FAILED,
+            actual_transport=MessageTransport.IMESSAGE,
+            correlation_confidence=CorrelationConfidence.EXACT,
         )
     )
     sms_sender = Mock(
@@ -88,13 +330,14 @@ def test_exact_imessage_failure_falls_back_to_sms_exactly_once() -> None:
     result = send_message(
         "+14155551234",
         "hello",
+        IMESSAGE_WITH_SMS_FALLBACK,
         upstream_sender=imessage_sender,
         sms_sender=sms_sender,
     )
 
-    assert result == "delivered:SMS"
     imessage_sender.assert_called_once_with("+14155551234", "hello")
     sms_sender.assert_called_once_with("+14155551234", "hello")
+    assert result == "delivered:SMS"
 
 
 def test_immediate_imessage_error_starts_a_fresh_sms_attempt() -> None:
@@ -117,7 +360,11 @@ def test_immediate_imessage_error_starts_a_fresh_sms_attempt() -> None:
             side_effect=[100.0, 200.0],
         ),
     ):
-        result = send_message("+14155551234", "hello")
+        result = send_message(
+            "+14155551234",
+            "hello",
+            IMESSAGE_WITH_SMS_FALLBACK,
+        )
 
     assert result == "delivered:SMS"
     assert runner.call_count == 2
@@ -134,39 +381,58 @@ def test_immediate_imessage_error_starts_a_fresh_sms_attempt() -> None:
     )
 
 
-def test_observed_imessage_failure_gives_sms_an_independent_window() -> None:
+def test_imessage_only_observed_failure_does_not_start_an_sms_window() -> None:
     imessage_failed = SendAttemptOutcome(
         state=AttemptState.FAILED,
         actual_transport=MessageTransport.IMESSAGE,
         correlation_confidence=CorrelationConfidence.EXACT,
         fallback_permitted=True,
     )
-    sms_delivered = SendAttemptOutcome(
-        state=AttemptState.DELIVERED,
-        actual_transport=MessageTransport.RCS,
-        correlation_confidence=CorrelationConfidence.EXACT,
-    )
     with (
         patch(
             "send_only_mac_messages.upstream_messages.run_applescript",
-            side_effect=["success", "success"],
-        ),
+            return_value="success",
+        ) as runner,
         patch(
             "send_only_mac_messages.upstream_messages._verify_send_in_db",
-            side_effect=[imessage_failed, sms_delivered],
+            return_value=imessage_failed,
         ) as observer,
-        patch(
-            "send_only_mac_messages.upstream_messages.time.time",
-            side_effect=[100.0, 200.0],
-        ),
+        patch("send_only_mac_messages.upstream_messages.time.time", return_value=100.0),
     ):
         result = send_message("+14155551234", "hello")
 
-    assert result == "delivered:SMS"
-    assert observer.call_args_list[0].args == ("+14155551234", 100.0, "hello")
-    assert observer.call_args_list[0].kwargs == {"service": MessageTransport.IMESSAGE}
-    assert observer.call_args_list[1].args == ("+14155551234", 200.0, "hello")
-    assert observer.call_args_list[1].kwargs == {"service": MessageTransport.SMS}
+    assert result == "error:send_failed:iMessage"
+    runner.assert_called_once()
+    observer.assert_called_once_with(
+        "+14155551234",
+        100.0,
+        "hello",
+        service=MessageTransport.IMESSAGE,
+    )
+
+
+def test_imessage_only_immediate_failure_does_not_submit_sms() -> None:
+    imessage_sender = Mock(
+        return_value=SendAttemptOutcome(
+            state=AttemptState.FAILED,
+            actual_transport=MessageTransport.IMESSAGE,
+            correlation_confidence=CorrelationConfidence.NONE,
+            fallback_permitted=True,
+        )
+    )
+    sms_sender = Mock()
+
+    result = send_message(
+        "+14155551234",
+        "hello",
+        IMESSAGE_ONLY,
+        upstream_sender=imessage_sender,
+        sms_sender=sms_sender,
+    )
+
+    assert result == "error:send_failed:iMessage"
+    imessage_sender.assert_called_once_with("+14155551234", "hello")
+    sms_sender.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -221,7 +487,7 @@ def test_all_unknown_reasons_are_fixed_for_both_public_services(
         imessage_outcome = SendAttemptOutcome(
             state=AttemptState.FAILED,
             actual_transport=MessageTransport.IMESSAGE,
-            correlation_confidence=CorrelationConfidence.EXACT,
+            correlation_confidence=CorrelationConfidence.NONE,
             fallback_permitted=True,
         )
     sms_sender = Mock(return_value=unknown)
@@ -229,6 +495,7 @@ def test_all_unknown_reasons_are_fixed_for_both_public_services(
     result = send_message(
         "+14155551234",
         "hello",
+        IMESSAGE_WITH_SMS_FALLBACK,
         upstream_sender=Mock(return_value=imessage_outcome),
         sms_sender=sms_sender,
     )
@@ -286,7 +553,7 @@ def test_sms_fallback_returns_its_final_outcome_without_a_loop(
     imessage_failed = SendAttemptOutcome(
         state=AttemptState.FAILED,
         actual_transport=MessageTransport.IMESSAGE,
-        correlation_confidence=CorrelationConfidence.EXACT,
+        correlation_confidence=CorrelationConfidence.NONE,
         fallback_permitted=True,
     )
     sms_sender = Mock(return_value=sms_outcome)
@@ -294,6 +561,7 @@ def test_sms_fallback_returns_its_final_outcome_without_a_loop(
     result = send_message(
         "+14155551234",
         "hello",
+        IMESSAGE_WITH_SMS_FALLBACK,
         upstream_sender=Mock(return_value=imessage_failed),
         sms_sender=sms_sender,
     )
@@ -314,6 +582,7 @@ def test_applescript_timeout_never_triggers_sms_fallback() -> None:
         result = send_message(
             "+14155551234",
             "hello",
+            IMESSAGE_WITH_SMS_FALLBACK,
             sms_sender=sms_sender,
         )
 
@@ -327,6 +596,7 @@ def test_missing_sender_result_never_triggers_sms_fallback() -> None:
     result = send_message(
         "+14155551234",
         "hello",
+        IMESSAGE_WITH_SMS_FALLBACK,
         upstream_sender=Mock(return_value=None),
         sms_sender=sms_sender,
     )
@@ -342,6 +612,7 @@ def test_tool_interruption_propagates_without_sms_fallback() -> None:
         send_message(
             "+14155551234",
             "hello",
+            IMESSAGE_WITH_SMS_FALLBACK,
             upstream_sender=Mock(side_effect=KeyboardInterrupt),
             sms_sender=sms_sender,
         )
@@ -551,6 +822,15 @@ def test_structured_outcomes_are_mapped_to_fixed_redacted_tokens() -> None:
             ),
             "error:send_failed:SMS",
         ),
+        (
+            SendAttemptOutcome(
+                AttemptState.SENT_UNCONFIRMED,
+                MessageTransport.IMESSAGE,
+                CorrelationConfidence.EXACT,
+                ObservationReason.GROUP_DELIVERY_NOT_REPORTED,
+            ),
+            "sent:iMessage:group-delivery-not-reported",
+        ),
     ]
 
     for structured_outcome, expected in cases:
@@ -626,3 +906,79 @@ def test_timeout_is_reported_without_retrying() -> None:
         )
 
     mocked_run.assert_called_once()
+
+
+# Kevin's line sends nothing from 8pm to 8am Pacific (Carlson, 2026-10-27:
+# "no more sending past 8pm"). Each test passes the moment in as `clock`.
+def _at(moment: str) -> Callable[[], datetime]:
+    return lambda: datetime.fromisoformat(moment)
+
+
+@pytest.mark.parametrize(
+    ("moment", "sends"),
+    [
+        ("2026-10-27T19:59:59-07:00", True),
+        ("2026-10-27T20:00:00-07:00", False),
+        ("2026-10-28T07:59:59-07:00", False),
+        ("2026-10-28T08:00:00-07:00", True),
+        ("2026-12-02T03:59:59+00:00", True),  # 7:59:59 pm PST
+        ("2026-12-02T04:00:00+00:00", False),  # 8:00 pm PST
+        ("2026-10-28T03:00:00+00:00", False),  # 8:00 pm PDT
+    ],
+)
+def test_quiet_hours_refuse_before_messages_is_touched(
+    moment: str, sends: bool
+) -> None:
+    outcome = SendAttemptOutcome(
+        AttemptState.DELIVERED, MessageTransport.IMESSAGE, CorrelationConfidence.EXACT
+    )
+    sender = Mock(return_value=outcome)
+
+    result = send_message(
+        "4155551234", "hello", IMESSAGE_ONLY, upstream_sender=sender, clock=_at(moment)
+    )
+
+    if sends:
+        assert result == "delivered:iMessage"
+        sender.assert_called_once()
+    else:
+        assert result == "rejected:quiet_hours"
+        sender.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", [IMESSAGE_ONLY, IMESSAGE_WITH_SMS_FALLBACK, SMS_ONLY])
+def test_quiet_hours_cover_every_mode_and_groups(mode: str) -> None:
+    senders = {
+        name: Mock() for name in ("upstream_sender", "sms_sender", "group_sender")
+    }
+    night = _at("2026-10-27T23:00:00-07:00")
+
+    assert send_message("4155551234", "hello", mode, clock=night, **senders) == (  # type: ignore[arg-type]
+        "rejected:quiet_hours"
+    )
+    assert send_message(
+        GROUP_CHAT_ID, "hello", IMESSAGE_ONLY, clock=night, **senders
+    ) == ("rejected:quiet_hours")
+    for sender in senders.values():
+        sender.assert_not_called()
+
+
+def test_quiet_hours_come_before_input_checks() -> None:
+    assert (
+        send_message(
+            "not a number",
+            "hello",
+            IMESSAGE_ONLY,
+            clock=_at("2026-10-27T21:00:00-07:00"),
+        )
+        == "rejected:quiet_hours"
+    )
+    assert (
+        send_message(
+            "not a number",
+            "hello",
+            IMESSAGE_ONLY,
+            clock=_at("2026-10-27T12:00:00-07:00"),
+        )
+        == "rejected:invalid_recipient"
+    )

@@ -13,7 +13,8 @@ uv build
 
 Tests must mock AppleScript and must never send a real message. Database tests must
 use temporary fixtures and never open the user's live Messages database. Do not
-expand ADR-0005's exact-attempt observer or one-shot SMS/RCS fallback into history
+expand ADR-0005's exact-attempt observer or ADR-0006's immediate-only SMS/RCS
+fallback into history
 reads, Contacts access, chat or recipient discovery, attachments, arbitrary database
 access, retained send state, automatic retry after ambiguity, or a second MCP tool
 without another explicit architecture decision.

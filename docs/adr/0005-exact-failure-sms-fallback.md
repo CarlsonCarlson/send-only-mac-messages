@@ -1,6 +1,6 @@
 # ADR-0005: Fall back once after an exactly correlated iMessage failure
 
-**Status:** Accepted
+**Status:** Superseded in part by ADR-0006
 
 ## Context
 

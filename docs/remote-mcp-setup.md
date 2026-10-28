@@ -4,8 +4,10 @@ This deployment mirrors Heimdall's private remote-MCP authentication: one fixed
 bearer, only its SHA-256 digest on the hosted Mac, and stateless Streamable HTTP
 behind a dedicated Cloudflare hostname. It does not authorize a particular send.
 Delivery results come only from the narrow, transient observer described in ADR-0003.
-ADR-0005 constrains the one internal SMS/RCS fallback after an immediate or exactly
-correlated definitive iMessage failure. Neither result proves human receipt.
+ADR-0007 requires an explicit delivery mode for every call. `imessage_only` never
+attempts SMS/RCS. `imessage_with_sms_fallback` may make one SMS/RCS submission after
+an immediate or exactly correlated iMessage failure and therefore carries the known
+delayed-iMessage duplicate risk. Neither result proves human receipt.
 
 No command in this guide invokes Messages.app. A live canary remains a separate,
 explicitly approved action.
@@ -49,8 +51,8 @@ observation. A grant proven for Terminal does not by itself prove that a LaunchA
 process can read `~/Library/Messages/chat.db`. If the database is unavailable, sends
 remain possible but return
 `error:send_status_unknown:<service>:database-unavailable`, and an accepted iMessage
-will not fall back to SMS/RCS. The fixed suffix distinguishes this case from
-`message-not-correlated` and never authorizes retry.
+will not fall back to SMS/RCS in either delivery mode. The fixed suffix distinguishes
+this case from `message-not-correlated` and never authorizes retry.
 
 ## 3. Create the bearer
 
@@ -156,9 +158,10 @@ default_tools_approval_mode = "prompt"
 
 Restart Codex after changing its environment or MCP configuration. Verify
 authenticated initialization and tool discovery first. Do not invoke the tool as a
-connectivity test. Configure an end-to-end tool timeout of at least 40 seconds so
-each transport can receive its own ten-second observation window; never retry a
-timeout or missing response automatically.
+connectivity test. Every invocation must provide `delivery_mode` as either
+`imessage_only` or `imessage_with_sms_fallback`. Configure an end-to-end tool timeout
+of at least 40 seconds so each transport can receive its own ten-second observation
+window; never retry a timeout or missing response automatically.
 
 ## 7. Add a managed cloud agent later
 
